@@ -1,0 +1,119 @@
+[
+  {
+    "id": "srv_lab_01",
+    "type": "prtg",
+    "enabled": true,
+    "name": "PRTG LAB 01",
+    "url": "http://127.0.0.1:9090/prtg-01",
+    "username": "demo",
+    "password": "demo-only-not-a-secret"
+  },
+  {
+    "id": "srv_lab_02",
+    "type": "prtg",
+    "enabled": true,
+    "name": "PRTG LAB 02",
+    "url": "http://127.0.0.1:9090/prtg-02",
+    "username": "demo",
+    "password": "demo-only-not-a-secret"
+  },
+  {
+    "id": "srv_lab_03",
+    "type": "prtg",
+    "enabled": true,
+    "name": "PRTG LAB 03",
+    "url": "http://127.0.0.1:9090/prtg-03",
+    "username": "demo",
+    "password": "demo-only-not-a-secret"
+  },
+  {
+    "id": "srv_lab_04",
+    "type": "prtg",
+    "enabled": true,
+    "name": "PRTG LAB 04",
+    "url": "http://127.0.0.1:9090/prtg-04",
+    "username": "demo",
+    "password": "demo-only-not-a-secret"
+  },
+  {
+    "id": "srv_lab_05",
+    "type": "prtg",
+    "enabled": true,
+    "name": "PRTG LAB 05",
+    "url": "http://127.0.0.1:9090/prtg-05",
+    "username": "demo",
+    "password": "demo-only-not-a-secret"
+  },
+  {
+    "id": "srv_lab_06",
+    "type": "prtg",
+    "enabled": true,
+    "name": "PRTG LAB 06",
+    "url": "http://127.0.0.1:9090/prtg-06",
+    "username": "demo",
+    "password": "demo-only-not-a-secret"
+  },
+  {
+    "id": "srv_lab_07",
+    "type": "prtg",
+    "enabled": true,
+    "name": "PRTG LAB 07",
+    "url": "http://127.0.0.1:9090/prtg-07",
+    "username": "demo",
+    "password": "demo-only-not-a-secret"
+  },
+  {
+    "id": "srv_lab_08",
+    "type": "prtg",
+    "enabled": true,
+    "name": "PRTG LAB 08",
+    "url": "http://127.0.0.1:9090/prtg-08",
+    "username": "demo",
+    "password": "demo-only-not-a-secret"
+  },
+  {
+    "id": "srv_lab_09",
+    "type": "prtg",
+    "enabled": true,
+    "name": "PRTG LAB 09",
+    "url": "http://127.0.0.1:9090/prtg-09",
+    "username": "demo",
+    "password": "demo-only-not-a-secret"
+  },
+  {
+    "id": "srv_lab_10",
+    "type": "prtg",
+    "enabled": true,
+    "name": "PRTG LAB 10",
+    "url": "http://127.0.0.1:9090/prtg-10",
+    "username": "demo",
+    "password": "demo-only-not-a-secret"
+  },
+  {
+    "id": "srv_lab_11",
+    "type": "prtg",
+    "enabled": true,
+    "name": "PRTG LAB 11",
+    "url": "http://127.0.0.1:9090/prtg-11",
+    "username": "demo",
+    "password": "demo-only-not-a-secret"
+  },
+  {
+    "id": "srv_lab_12",
+    "type": "prtg",
+    "enabled": true,
+    "name": "PRTG LAB 12",
+    "url": "http://127.0.0.1:9090/prtg-12",
+    "username": "demo",
+    "password": "demo-only-not-a-secret"
+  },
+  {
+    "id": "srv_lab_13",
+    "type": "prtg",
+    "enabled": true,
+    "name": "PRTG LAB 13",
+    "url": "http://127.0.0.1:9090/prtg-13",
+    "username": "demo",
+    "password": "demo-only-not-a-secret"
+  }
+]

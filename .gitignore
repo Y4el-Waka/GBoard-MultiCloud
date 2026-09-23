@@ -1,0 +1,31 @@
+# Secrets / local config
+.env
+*.env
+!.env.example
+servers.json
+
+# Runtime data
+estado_sensores_prtg.json
+usuarios.db
+usuarios.db-*
+*.sqlite
+*.sqlite3
+
+# User-uploaded audio
+static/uploads/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Tests / tooling
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

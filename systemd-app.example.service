@@ -1,0 +1,15 @@
+[Unit]
+Description=PRTG Dashboard Flask App
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/prtg-dashboard
+EnvironmentFile=/opt/prtg-dashboard/.env
+ExecStart=/opt/prtg-dashboard/.venv/bin/python app.py
+Restart=always
+RestartSec=5
+User=www-data
+Group=www-data
+
+[Install]
+WantedBy=multi-user.target

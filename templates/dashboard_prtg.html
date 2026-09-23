@@ -1,0 +1,1095 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PRTG Network Dashboard</title>
+
+  <script>
+    (function () {
+      if (localStorage.getItem('theme') === 'dark') {
+        document.documentElement.classList.add('dark');
+      }
+    })();
+  </script>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            prtg: {
+              up: '#7ad03a',
+              down: '#dd3d36',
+              warning: '#ffb700',
+              paused: '#296E8A',
+              acknowledged: '#7e57c2',
+              unknown: '#90a4ae'
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}?v=20260920-mf2">
+
+
+  <!-- MF visual override: alerta sutil en toda la tarjeta, sin recuadro interno -->
+  <style id="mf-card-visual-fix">
+    .sensor-card.mf-alert-card {
+      border: 1px solid rgba(250, 204, 21, 0.48) !important;
+      background:
+        linear-gradient(180deg, rgba(250, 204, 21, 0.035), rgba(11, 11, 15, 0.98) 34%) !important;
+      box-shadow:
+        0 0 0 1px rgba(250, 204, 21, 0.08),
+        0 10px 28px rgba(250, 204, 21, 0.08) !important;
+    }
+
+    .sensor-card.mf-alert-card:hover {
+      border-color: rgba(250, 204, 21, 0.62) !important;
+      box-shadow:
+        0 0 0 1px rgba(250, 204, 21, 0.11),
+        0 14px 34px rgba(250, 204, 21, 0.11) !important;
+    }
+
+    .sensor-card.mf-alert-card::after {
+      background: linear-gradient(90deg, rgba(250, 204, 21, 0.28), rgba(250, 204, 21, 0.08)) !important;
+      opacity: 1 !important;
+    }
+
+    .mf-sla-widget,
+    .mf-sla-widget.is-running,
+    .mf-sla-widget.is-breached,
+    .mf-sla-widget.is-idle {
+      width: 100% !important;
+      margin-top: 12px !important;
+      padding: 0 !important;
+      border: 0 !important;
+      border-left: 0 !important;
+      border-radius: 0 !important;
+      background: transparent !important;
+      box-shadow: none !important;
+      display: flex !important;
+      flex-direction: column !important;
+      align-items: flex-start !important;
+      gap: 7px !important;
+    }
+
+    .mf-sla-heading {
+      width: 100% !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: flex-start !important;
+      gap: 5px !important;
+      line-height: 1.1 !important;
+      white-space: nowrap;
+    }
+
+    .mf-sla-label,
+    .mf-sla-state {
+      font-size: 11px !important;
+      font-weight: 900 !important;
+      letter-spacing: 0.04em !important;
+      text-transform: uppercase !important;
+    }
+
+    .mf-sla-label {
+      color: #facc15 !important;
+    }
+
+    .mf-sla-state {
+      color: #fde68a !important;
+      margin-left: 0 !important;
+    }
+
+    .mf-sla-widget.is-breached .mf-sla-state {
+      color: #fbbf24 !important;
+    }
+
+    .mf-sla-time {
+      display: block !important;
+      width: 100% !important;
+      min-width: 0 !important;
+      margin: 0 !important;
+      font-family: Monaco, Menlo, Consolas, monospace !important;
+      font-size: clamp(22px, 2vw, 28px) !important;
+      font-weight: 900 !important;
+      line-height: 1.05 !important;
+      letter-spacing: 0.04em !important;
+      color: #fff9db !important;
+      white-space: nowrap !important;
+      overflow: visible !important;
+    }
+
+    .mf-sla-widget.is-breached .mf-sla-time {
+      color: #fde68a !important;
+    }
+
+    .mf-sla-widget.is-idle {
+      margin-top: 8px !important;
+      gap: 0 !important;
+      opacity: 0.72;
+    }
+
+    .mf-sla-widget.is-idle .mf-sla-label,
+    .mf-sla-widget.is-idle .mf-sla-state {
+      color: #a1a1aa !important;
+    }
+
+    @media (max-width: 640px) {
+      .mf-sla-time {
+        font-size: 22px !important;
+      }
+    }
+
+    /* MF hotfix v2: sin línea lateral y contador blanco */
+    .mf-sla-widget::before,
+    .mf-sla-widget::after,
+    .mf-sla-widget.is-running::before,
+    .mf-sla-widget.is-running::after,
+    .mf-sla-widget.is-breached::before,
+    .mf-sla-widget.is-breached::after {
+      content: none !important;
+      display: none !important;
+      width: 0 !important;
+      border: 0 !important;
+      background: transparent !important;
+      box-shadow: none !important;
+    }
+
+    .mf-sla-time,
+    .mf-sla-widget.is-running .mf-sla-time,
+    .mf-sla-widget.is-breached .mf-sla-time {
+      color: #ffffff !important;
+      border: 0 !important;
+      border-left: 0 !important;
+      box-shadow: none !important;
+      text-shadow: none !important;
+    }
+
+  </style>
+
+</head>
+
+<body class="bg-gray-50 text-gray-800 min-h-screen"
+      data-user-role="{{ rol|default('lector') }}"
+      data-username="{{ usuario|default('') }}">
+
+  <!-- Topbar -->
+ <div id="welcome-bar" class="welcome-bar">
+  <h1 class="text-xl font-semibold text-white">
+    Bienvenido {{ usuario }}
+  </h1>
+
+  <div class="mt-1 flex items-center justify-center gap-3">
+    <span class="text-xs text-white/80 uppercase tracking-wide">
+      Rol: {{ rol }}
+    </span>
+  </div>
+</div>
+
+  <main class="container mx-auto px-4 py-8">
+    <!-- Header -->
+    <header class="mb-8">
+      <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h2 class="text-3xl font-bold text-gray-800 flex items-center">
+            <i class="fas fa-network-wired mr-3 text-blue-600"></i>
+            PRTG Network Dashboard
+          </h2>
+          <p class="text-gray-500 mt-1">Monitoreo de Servidores PRTG</p>
+        </div>
+
+        <div>
+          <div class="bg-white rounded-lg shadow-sm px-4 py-2 flex items-center text-sm">
+            <i class="fas fa-clock text-gray-400 mr-2.5"></i>
+            <span id="last-updated" class="font-medium text-gray-700">Cargando...</span>
+          </div>
+          <p class="text-right text-xs text-gray-400 mt-1">by: gyro</p>
+        </div>
+      </div>
+    </header>
+
+    <!-- KPIs -->
+    <section class="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-8" aria-label="Resumen de sensores">
+      <div class="lg:col-span-3 grid grid-cols-2 md:grid-cols-3 gap-4">
+        <article id="card-total" class="metric-card bg-white rounded-lg shadow-sm p-4 flex items-center justify-between transition-all">
+          <div>
+            <p class="text-sm text-gray-500">Total Sensores</p>
+            <h3 id="total-sensors" class="text-2xl font-bold text-gray-800">--</h3>
+          </div>
+          <div class="bg-blue-100 p-3 rounded-full">
+            <i class="fas fa-layer-group text-blue-500 text-xl"></i>
+          </div>
+        </article>
+
+        <article id="card-up" class="metric-card bg-white rounded-lg shadow-sm p-4 flex items-center justify-between transition-all">
+          <div>
+            <p class="text-sm text-gray-500">Up</p>
+            <h3 id="up-sensors" class="text-2xl font-bold text-prtg-up">--</h3>
+          </div>
+          <div class="bg-green-100 p-3 rounded-full">
+            <i class="fas fa-check-circle text-prtg-up text-xl"></i>
+          </div>
+        </article>
+
+        <article id="card-down" class="metric-card bg-white rounded-lg shadow-sm p-4 flex items-center justify-between transition-all">
+          <div>
+            <p class="text-sm text-gray-500">Down</p>
+            <h3 id="down-sensors" class="text-2xl font-bold text-prtg-down">--</h3>
+          </div>
+          <div class="bg-red-100 p-3 rounded-full">
+            <i class="fas fa-times-circle text-prtg-down text-xl"></i>
+          </div>
+        </article>
+
+        <article id="card-warning" class="metric-card bg-white rounded-lg shadow-sm p-4 flex items-center justify-between transition-all">
+          <div>
+            <p class="text-sm text-gray-500">Warning</p>
+            <h3 id="warning-sensors" class="text-2xl font-bold text-prtg-warning">--</h3>
+          </div>
+          <div class="bg-yellow-100 p-3 rounded-full">
+            <i class="fas fa-exclamation-triangle text-prtg-warning text-xl"></i>
+          </div>
+        </article>
+
+        <article id="card-paused" class="metric-card bg-white rounded-lg shadow-sm p-4 flex items-center justify-between transition-all">
+          <div>
+            <p class="text-sm text-gray-500">Pausados</p>
+            <h3 id="paused-sensors" class="text-2xl font-bold text-prtg-paused">--</h3>
+          </div>
+          <div class="bg-sky-100 p-3 rounded-full">
+            <i class="fas fa-pause-circle text-prtg-paused text-xl"></i>
+          </div>
+        </article>
+
+        <article id="card-ack" class="metric-card bg-white rounded-lg shadow-sm p-4 flex items-center justify-between transition-all">
+          <div>
+            <p class="text-sm text-gray-500">Confirmado</p>
+            <h3 id="acknowledged-sensors" class="text-2xl font-bold text-prtg-acknowledged">--</h3>
+          </div>
+          <div class="bg-purple-100 p-3 rounded-full">
+            <i class="fas fa-user-check text-prtg-acknowledged text-xl"></i>
+          </div>
+        </article>
+      </div>
+
+               <aside class="bg-white rounded-lg shadow-sm p-4 flex flex-col">
+  <div class="metric-card p-4 h-full">
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="text-lg font-semibold text-gray-100 flex items-center gap-2">
+        <i class="fa-solid fa-chart-pie text-violet-400"></i>
+        Estado general
+      </h3>
+    </div>
+
+    <div class="status-overview status-overview-only-chart">
+  <div class="status-overview-chart">
+    <canvas id="statusChart"></canvas>
+  </div>
+</div>
+  </div>
+</aside>
+          </section>
+
+    <!-- Filtros -->
+    <section class="mb-6 bg-white rounded-lg shadow-sm p-4" aria-label="Filtros">
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="lg:col-span-2">
+          <label for="search" class="block text-sm font-medium text-gray-700 mb-1">Buscar</label>
+          <div class="relative">
+            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <i class="fas fa-search text-gray-400"></i>
+            </div>
+            <input id="search"
+                   type="search"
+                   class="pl-10 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 py-2 px-3 border"
+                   placeholder="Buscar por sensor, dispositivo o IP...">
+          </div>
+        </div>
+
+        <div>
+          <label for="status-filter" class="block text-sm font-medium text-gray-700 mb-1">Estado</label>
+          <select id="status-filter"
+                  class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 py-2 px-3 border">
+            <option value="all">Todos los Estados</option>
+            <option value="Up">Up</option>
+            <option value="Down">Down</option>
+            <option value="Down Acknowledged">Down Acknowledged</option>
+            <option value="Warning">Warning</option>
+            <option value="Paused">Paused</option>
+            <option value="Unknown">Unknown / Otros</option>
+          </select>
+        </div>
+
+        <div>
+          <label for="server-filter" class="block text-sm font-medium text-gray-700 mb-1">Servidor</label>
+          <select id="server-filter"
+                  class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 py-2 px-3 border">
+            <option value="all">Todos los Servidores</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <!-- Contenido -->
+    <section class="bg-white rounded-lg shadow-sm">
+      <div class="border-b border-gray-200">
+        <nav class="-mb-px flex space-x-6 px-6 overflow-x-auto" aria-label="Tabs">
+          <button id="tab-sensors"
+                  class="tab-button active py-3 border-b-2 border-blue-500 text-blue-600 whitespace-nowrap"
+                  data-view="sensors"
+                  type="button">
+            <i class="fas fa-th-large mr-2"></i>Sensores
+          </button>
+
+          <button id="tab-logs"
+                  class="tab-button py-3 text-gray-500 hover:text-blue-600 whitespace-nowrap"
+                  data-view="logs"
+                  type="button">
+            <i class="fas fa-history mr-2"></i>Logs de Cambios
+          </button>
+
+          <button id="tab-trends"
+                  class="tab-button py-3 text-gray-500 hover:text-blue-600 whitespace-nowrap"
+                  data-view="trends"
+                  type="button">
+            <i class="fa-solid fa-chart-line mr-2"></i>Tendencia
+          </button>
+        </nav>
+      </div>
+
+      <div id="loading-state" class="flex flex-col items-center justify-center py-20">
+        <div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div>
+        <p class="text-gray-600">Cargando datos de sensores...</p>
+      </div>
+
+      <div id="error-state" class="hidden text-center py-20">
+        <i class="fas fa-exclamation-triangle text-red-400 text-5xl mb-4"></i>
+        <h3 class="text-xl font-medium text-gray-700">Fallo al cargar los datos</h3>
+        <p class="text-gray-500 mt-1" id="error-message">No se pudieron cargar los datos.</p>
+
+        <button id="retry-btn"
+                type="button"
+                class="mt-4 bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg inline-flex items-center transition-colors">
+          <i class="fas fa-sync-alt mr-2"></i>Reintentar
+        </button>
+      </div>
+
+      <div id="view-content" class="hidden">
+        <div id="sensor-grid-view" class="p-4">
+
+  <!-- Sensores fijados -->
+  <section id="pinned-sensors-section" class="hidden mb-6">
+    <div class="flex items-center justify-between gap-3 mb-3 px-1">
+      <div class="flex items-center gap-2">
+        <div class="pinned-section-icon">
+          <i class="fa-solid fa-thumbtack"></i>
+        </div>
+
+        <div>
+          <h3 class="text-sm font-bold text-gray-100">
+            Servicios fijados
+          </h3>
+
+          <p class="text-xs text-gray-500">
+            Acceso rápido a tus sensores prioritarios
+          </p>
+        </div>
+      </div>
+
+      <span id="pinned-sensors-count" class="pinned-count-badge">
+        0
+      </span>
+    </div>
+
+    <div id="pinned-sensor-grid" class="pinned-sensor-grid"></div>
+  </section>
+
+  <!-- Sensores generales -->
+  <div
+    id="sensor-grid"
+    class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+  </div>
+
+          <div id="no-results" class="hidden text-center py-20">
+            <i class="fas fa-search text-gray-400 text-5xl mb-4"></i>
+            <h3 class="text-xl font-medium text-gray-700">No se encontraron sensores</h3>
+            <p class="text-gray-500 mt-1">Prueba cambiando los filtros.</p>
+          </div>
+        </div>
+
+        <div id="logs-view" class="hidden p-4">
+          <div class="log-export-toolbar">
+            <div>
+              <h2 class="text-base font-bold text-gray-100 flex items-center gap-2">
+                <i class="fa-solid fa-file-export text-blue-400"></i>
+                Exportar resumen agrupado
+              </h2>
+              <p class="text-xs text-gray-500 mt-1">
+                Agrupa intermitencias y falsas alertas por servicio, por ejemplo: servicio alertado x30.
+              </p>
+            </div>
+
+            <div class="log-export-actions">
+              <button type="button" class="log-export-btn" data-hours="12">
+                <i class="fa-regular fa-clock"></i>
+                Últimas 12 h
+              </button>
+
+              <button type="button" class="log-export-btn" data-hours="24">
+                <i class="fa-regular fa-clock"></i>
+                Últimas 24 h
+              </button>
+
+              <button type="button" class="log-export-btn" data-hours="72">
+                <i class="fa-solid fa-calendar-days"></i>
+                Últimas 72 h
+              </button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <h2 class="text-lg font-semibold border-b pb-2 mb-4 flex items-center">
+                <i class="fas fa-arrow-up text-prtg-up mr-2"></i>
+                Sensores Recuperados
+              </h2>
+              <div class="space-y-2" id="up-logs-container"></div>
+            </div>
+
+            <div>
+              <h2 class="text-lg font-semibold border-b pb-2 mb-4 flex items-center">
+                <i class="fas fa-arrow-down text-prtg-down mr-2"></i>
+                Sensores con Fallo
+              </h2>
+              <div class="space-y-2" id="down-logs-container"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="trends-view" class="hidden p-4">
+          <div class="bg-white rounded-lg shadow-sm p-4">
+            <div class="flex items-center justify-between mb-2">
+              <h2 class="text-lg font-semibold flex items-center">
+                <i class="fa-solid fa-chart-line mr-2 text-blue-600"></i>
+                Evolución agregada
+              </h2>
+              <span id="metrics-updated" class="text-xs text-gray-500"></span>
+            </div>
+
+            <canvas id="metricsChart" height="130"></canvas>
+            <p class="text-xs text-gray-400 mt-2">Serie por estado generada por el proceso de monitoreo.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Botón flotante ajustes -->
+  <div class="settings-fab" id="settings-fab">
+            <div class="settings-menu hidden" id="settings-menu" aria-label="Ajustes rápidos">
+      {% if rol in ['admin', 'admon'] %}
+      <button class="settings-action" id="settings-audit" type="button" title="Auditoría">
+        <span class="settings-action-label">Auditoría</span>
+        <i class="fa-solid fa-shield-halved"></i>
+      </button>
+      {% endif %}
+
+              <a id="settings-logout"
+           href="{{ url_for('logout') }}"
+           class="settings-action"
+           title="Cerrar sesión">
+          <i class="fas fa-right-from-bracket"></i>
+          <span class="settings-action-label">Cerrar sesión</span>
+        </a>
+
+      <button class="settings-action" id="settings-servers" type="button" title="Agregar servidor">
+        <span class="settings-action-label">Agregar servidor</span>
+        <i class="fas fa-server"></i>
+      </button>
+
+      <button class="settings-action" id="settings-users" type="button" title="Agregar usuario">
+        <span class="settings-action-label">Agregar usuario</span>
+        <i class="fas fa-user-plus"></i>
+      </button>
+
+      <button class="settings-action" id="settings-alerts" type="button" title="Alertas">
+        <span class="settings-action-label">Alertas</span>
+        <i class="fa-solid fa-bell"></i>
+      </button>
+    </div>
+
+    <button class="settings-toggle" id="settings-toggle" aria-label="Abrir ajustes" type="button">
+      <i class="fas fa-gear"></i>
+    </button>
+  </div>
+
+  <!-- Modal histórico -->
+  <div id="history-modal" class="modal-backdrop fixed inset-0 hidden items-center justify-center bg-black/60 p-4 z-50">
+    <div class="modal-panel bg-white dark:bg-[#161B22] rounded-xl shadow-2xl w-full max-w-3xl p-5">
+      <div class="flex justify-between items-start gap-4 mb-4">
+        <div>
+          <h3 id="history-title" class="text-lg font-semibold text-gray-800 dark:text-gray-100">Histórico</h3>
+          <p id="history-subtitle" class="text-sm text-gray-500 dark:text-gray-400"></p>
+        </div>
+
+        <button id="history-close" class="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200" type="button">
+          <i class="fa-solid fa-xmark text-xl"></i>
+        </button>
+      </div>
+
+      <div id="history-error" class="hidden text-sm text-red-600 mb-3"></div>
+      <div class="relative h-[420px]">
+        <canvas id="historyChart"></canvas>
+        </div>
+        <div class="history-footer mt-5 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+  <div class="text-xs text-gray-500">
+    <i class="fa-solid fa-circle-info mr-1"></i>
+    Cualquier usuario puede pausar o reanudar este sensor.
+  </div>
+
+  <div class="flex flex-col sm:flex-row gap-2 sm:items-center">
+    <div class="relative">
+      <button id="history-pause-toggle"
+              type="button"
+              class="history-action-btn history-action-pause">
+        <i class="fa-solid fa-pause mr-2"></i>
+        Pausar
+        <i class="fa-solid fa-chevron-down ml-2 text-xs"></i>
+      </button>
+
+      <div id="history-pause-menu" class="history-pause-menu hidden">
+        <button type="button" class="history-pause-option" data-minutes="60">
+          <i class="fa-regular fa-clock"></i>
+          Pausar 1 hora
+        </button>
+
+        <button type="button" class="history-pause-option" data-minutes="180">
+          <i class="fa-regular fa-clock"></i>
+          Pausar 3 horas
+        </button>
+
+        <button type="button" class="history-pause-option" data-minutes="1440">
+          <i class="fa-regular fa-calendar"></i>
+          Pausar 24 horas
+        </button>
+
+        <button type="button" id="history-custom-pause" class="history-pause-option">
+          <i class="fa-solid fa-calendar-days"></i>
+          Definir horario
+          <span class="text-[10px] opacity-60 ml-auto">próximo</span>
+        </button>
+      </div>
+    </div>
+
+    <button id="history-resume-btn"
+            type="button"
+            class="history-action-btn history-action-resume">
+      <i class="fa-solid fa-play mr-2"></i>
+      Reanudar
+    </button>
+  </div>
+</div>
+    </div>
+  </div>
+
+  <!-- Modal servidores -->
+  <div id="server-modal" class="modal-backdrop fixed inset-0 hidden items-center justify-center bg-black/60 p-4 z-50">
+    <div class="modal-panel bg-white dark:bg-[#161B22] rounded-xl shadow-2xl w-full max-w-4xl p-5">
+      <div class="flex justify-between items-start gap-4 mb-4">
+        <div>
+          <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100">Servidores PRTG</h3>
+          <p class="text-sm text-gray-500 dark:text-gray-400">Lista actual y alta de nuevos servidores desde la plataforma.</p>
+        </div>
+
+        <button id="server-close" class="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200" type="button">
+          <i class="fa-solid fa-xmark text-xl"></i>
+        </button>
+      </div>
+
+      <div id="server-modal-message" class="hidden rounded-lg p-3 text-sm mb-4"></div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <section>
+          <h4 class="font-semibold mb-2 flex items-center text-gray-800 dark:text-gray-100">
+            <i class="fa-solid fa-list mr-2 text-blue-600"></i>
+            Actuales
+          </h4>
+          <div id="servers-list" class="space-y-2 max-h-96 overflow-y-auto pr-1"></div>
+        </section>
+
+        <section class="bg-gray-50 dark:bg-[#0D1117] rounded-xl p-4">
+          <h4 class="font-semibold mb-3 flex items-center text-gray-800 dark:text-gray-100">
+            <i class="fa-solid fa-plus mr-2 text-blue-600"></i>
+            Agregar servidor
+          </h4>
+
+          <form id="server-form" class="space-y-3">
+            <div>
+              <label for="server-name" class="block text-sm font-medium text-gray-700 mb-1">Nombre visible</label>
+              <input id="server-name"
+                     name="name"
+                     type="text"
+                     class="block w-full rounded-md border-gray-300 shadow-sm py-2 px-3 border"
+                     placeholder="PRTG CENTRO">
+            </div>
+
+            <div>
+              <label for="server-url" class="block text-sm font-medium text-gray-700 mb-1">Servidor / puerto</label>
+              <input id="server-url"
+                     name="url"
+                     type="text"
+                     required
+                     class="block w-full rounded-md border-gray-300 shadow-sm py-2 px-3 border"
+                     placeholder="38.43.96.82:5055">
+              <p class="text-xs text-gray-400 mt-1">Si no pones https://, se agrega automático.</p>
+            </div>
+
+            <div>
+              <label for="server-username" class="block text-sm font-medium text-gray-700 mb-1">Usuario</label>
+              <input id="server-username"
+                     name="username"
+                     type="text"
+                     required
+                     class="block w-full rounded-md border-gray-300 shadow-sm py-2 px-3 border"
+                     placeholder="prtgadmin">
+            </div>
+
+            <div>
+              <label for="server-password" class="block text-sm font-medium text-gray-700 mb-1">Password PRTG</label>
+              <input id="server-password"
+                     name="password"
+                     type="password"
+                     required
+                     class="block w-full rounded-md border-gray-300 shadow-sm py-2 px-3 border"
+                     placeholder="No passhash">
+            </div>
+
+            <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium">
+              Guardar servidor
+            </button>
+          </form>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal usuarios -->
+  <div id="user-modal" class="modal-backdrop fixed inset-0 hidden items-center justify-center bg-black/60 p-4 z-50">
+    <div class="modal-panel bg-white dark:bg-[#161B22] rounded-xl shadow-2xl w-full max-w-7xl p-5 md:p-6">
+      <div class="flex justify-between items-start gap-4 mb-4">
+        <div>
+          <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100">Usuarios</h3>
+          <p class="text-sm text-gray-500 dark:text-gray-400">Admin crea usuarios; lectores solo miran y no tocan el fierro.</p>
+        </div>
+
+        <button id="user-close" class="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200" type="button">
+          <i class="fa-solid fa-xmark text-xl"></i>
+        </button>
+      </div>
+
+      <div class="rounded-lg border border-yellow-200 bg-yellow-50 text-yellow-800 p-3 text-sm mb-4">
+        <i class="fa-solid fa-envelope-circle-check mr-1"></i>
+        Envío de código por correo: <strong>standby</strong>. Queda listo el espacio para conectarlo después con alertas por correo.
+      </div>
+
+      <div id="user-modal-message" class="hidden rounded-lg p-3 text-sm mb-4"></div>
+
+      <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.45fr)_420px] gap-6">
+        <section>
+          <h4 class="font-semibold mb-2 flex items-center text-gray-800 dark:text-gray-100">
+            <i class="fa-solid fa-users mr-2 text-blue-600"></i>
+            Actuales
+          </h4>
+          <div id="users-list" class="space-y-2 max-h-96 overflow-y-auto pr-1"></div>
+        </section>
+
+        <section class="bg-gray-50 dark:bg-[#0D1117] rounded-xl p-4">
+          <h4 class="font-semibold mb-3 flex items-center text-gray-800 dark:text-gray-100">
+            <i class="fa-solid fa-user-plus mr-2 text-blue-600"></i>
+            Agregar usuario
+          </h4>
+
+          <form id="user-form" class="space-y-3">
+            <div>
+              <label for="new-user-email" class="block text-sm font-medium text-gray-700 mb-1">Correo</label>
+              <input id="new-user-email"
+                     name="email"
+                     type="email"
+                     required
+                     class="block w-full rounded-md border-gray-300 shadow-sm py-2 px-3 border"
+                     placeholder="usuario@empresa.com">
+            </div>
+
+            <div>
+              <label for="new-username" class="block text-sm font-medium text-gray-700 mb-1">Usuario</label>
+              <input id="new-username"
+                     name="username"
+                     type="text"
+                     class="block w-full rounded-md border-gray-300 shadow-sm py-2 px-3 border"
+                     placeholder="Opcional; si lo dejas vacío usa el correo">
+            </div>
+
+            <div>
+              <label for="new-user-password" class="block text-sm font-medium text-gray-700 mb-1">Password temporal</label>
+              <input id="new-user-password"
+                     name="password"
+                     type="password"
+                     required
+                     minlength="8"
+                     class="block w-full rounded-md border-gray-300 shadow-sm py-2 px-3 border"
+                     placeholder="Mínimo 8 caracteres">
+            </div>
+
+            <div>
+              <label for="new-user-role" class="block text-sm font-medium text-gray-700 mb-1">Rol</label>
+              <select id="new-user-role"
+                      name="rol"
+                      class="block w-full rounded-md border-gray-300 shadow-sm py-2 px-3 border">
+                <option value="lector">Lector</option>
+                <option value="admin">Admin</option>
+                <option value="admon">Admon</option>
+              </select>
+            </div>
+
+            <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium">
+              Crear usuario
+            </button>
+          </form>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal auditoría -->
+  {% if rol in ['admin', 'admon'] %}
+  <div id="audit-modal" class="modal-backdrop fixed inset-0 hidden items-center justify-center bg-black/60 p-4 z-50">
+    <div class="modal-panel audit-modal-panel w-full">
+      <div class="audit-modal-header">
+        <div>
+          <div class="audit-title-row">
+            <span class="audit-title-icon">
+              <i class="fa-solid fa-shield-halved"></i>
+            </span>
+            <div>
+              <h3 class="text-xl font-bold text-gray-100">Auditoría del sistema</h3>
+              <p class="text-sm text-gray-500">
+                Inicios de sesión, IP de origen y cambios realizados por los usuarios.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <button id="audit-close" class="modal-close-btn" type="button" aria-label="Cerrar auditoría">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div id="audit-modal-message" class="hidden rounded-lg p-3 text-sm mb-4"></div>
+
+      <form id="audit-filter-form" class="audit-filter-panel">
+        <div class="audit-filter-grid">
+          <div>
+            <label for="audit-user-filter">Usuario</label>
+            <select id="audit-user-filter" name="username">
+              <option value="">Todos</option>
+            </select>
+          </div>
+
+          <div>
+            <label for="audit-action-filter">Acción</label>
+            <select id="audit-action-filter" name="action">
+              <option value="">Todas</option>
+            </select>
+          </div>
+
+          <div>
+            <label for="audit-target-filter">Tipo</label>
+            <select id="audit-target-filter" name="target_type">
+              <option value="">Todos</option>
+            </select>
+          </div>
+
+          <div>
+            <label for="audit-ip-filter">IP</label>
+            <input id="audit-ip-filter" name="ip" type="text" placeholder="Ej. 10.10.20.15">
+          </div>
+
+          <div>
+            <label for="audit-date-from">Desde</label>
+            <input id="audit-date-from" name="date_from" type="date">
+          </div>
+
+          <div>
+            <label for="audit-date-to">Hasta</label>
+            <input id="audit-date-to" name="date_to" type="date">
+          </div>
+
+          <div class="audit-search-field">
+            <label for="audit-search-filter">Búsqueda</label>
+            <input id="audit-search-filter" name="q" type="search" placeholder="Usuario, sensor, servidor, detalle...">
+          </div>
+
+          <div>
+            <label for="audit-limit-filter">Resultados</label>
+            <select id="audit-limit-filter" name="limit">
+              <option value="50">50</option>
+              <option value="100" selected>100</option>
+              <option value="200">200</option>
+              <option value="500">500</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="audit-filter-actions">
+          <button id="audit-reset-filters" type="button" class="audit-secondary-btn">
+            <i class="fa-solid fa-filter-circle-xmark"></i>
+            Limpiar
+          </button>
+
+          <button type="submit" class="audit-primary-btn">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            Aplicar filtros
+          </button>
+        </div>
+      </form>
+
+      <div class="audit-results-header">
+        <div>
+          <span id="audit-result-count" class="audit-count-badge">0 eventos</span>
+        </div>
+
+        <button id="audit-refresh" type="button" class="audit-refresh-btn">
+          <i class="fa-solid fa-rotate"></i>
+          Actualizar
+        </button>
+      </div>
+
+      <div class="audit-table-wrap">
+        <table class="audit-table">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Usuario</th>
+              <th>Acción</th>
+              <th>Objetivo</th>
+              <th>IP</th>
+              <th>Solicitud</th>
+              <th>Detalle</th>
+            </tr>
+          </thead>
+          <tbody id="audit-table-body">
+            <tr>
+              <td colspan="7" class="audit-empty">Cargando auditoría...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Modal alertas -->
+  <div id="alerts-modal" class="modal-backdrop fixed inset-0 bg-black/50 hidden items-center justify-center z-[2000] p-4">
+    <div class="modal-panel bg-white dark:bg-[#161B22] rounded-2xl shadow-2xl w-full max-w-lg p-6">
+      <div class="flex items-start justify-between gap-4 mb-4">
+        <div>
+          <h2 class="text-xl font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
+            <i class="fa-solid fa-bell text-blue-600"></i>
+            Alertas de sonido
+          </h2>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            Configura cómo quieres que suene cuando aparezca un sensor caído.
+          </p>
+        </div>
+
+        <button id="alerts-close" type="button" class="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
+          <i class="fa-solid fa-xmark text-xl"></i>
+        </button>
+      </div>
+
+      <div id="alerts-modal-message" class="hidden rounded-lg p-3 text-sm mb-4"></div>
+
+      <div class="space-y-4">
+        <label class="flex items-center justify-between gap-4 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+          <div>
+            <p class="font-semibold text-gray-800 dark:text-gray-100">Activar sonido</p>
+            <p class="text-xs text-gray-500 dark:text-gray-400">
+              Si está apagado, no sonará automáticamente aunque haya sensores caídos.
+            </p>
+          </div>
+
+          <input id="alert-sound-enabled" type="checkbox" class="w-5 h-5">
+        </label>
+
+        <label class="flex items-center justify-between gap-4 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+          <div>
+            <p class="font-semibold text-gray-800 dark:text-gray-100">Repetir mientras haya Down</p>
+            <p class="text-xs text-gray-500 dark:text-gray-400">
+              Si está activo, sonará cada refresh cuando existan sensores caídos.
+              Si está apagado, solo sonará cuando aparezca un nuevo Down.
+            </p>
+          </div>
+
+          <input id="alert-repeat-down" type="checkbox" class="w-5 h-5">
+        </label>
+
+        <div class="rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+          <label for="alert-volume" class="block font-semibold text-gray-800 dark:text-gray-100 mb-2">
+            Volumen
+          </label>
+
+          <input id="alert-volume" type="range" min="0" max="100" value="75" class="w-full">
+
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">
+            Recomendado: 50% - 80%. (No funciona y ya no lo quiero revisar, saludos)
+          </p>
+        </div>
+
+        <div class="rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+  <div class="flex items-start justify-between gap-3 mb-3">
+    <div>
+      <p class="font-semibold text-gray-800 dark:text-gray-100">Sonido personalizado</p>
+      <p id="alert-current-sound" class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+        Cargando sonido actual...
+      </p>
+    </div>
+
+    <i class="fa-solid fa-music text-blue-600 mt-1"></i>
+  </div>
+
+  <input id="alert-sound-file"
+         type="file"
+         accept=".mp3,audio/mpeg"
+         class="block w-full text-sm text-gray-600 dark:text-gray-300
+                file:mr-4 file:rounded-lg file:border-0 file:bg-blue-50 file:px-4 file:py-2
+                file:text-sm file:font-semibold file:text-blue-700 hover:file:bg-blue-100">
+
+  <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">
+    Solo MP3. Máximo recomendado: 5 MB.
+  </p>
+
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+    <button id="upload-alert-sound"
+            type="button"
+            class="bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg px-4 py-2 text-sm font-semibold transition">
+      <i class="fa-solid fa-upload mr-2"></i>
+      Subir MP3
+    </button>
+
+    <button id="reset-alert-sound"
+            type="button"
+            class="bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg px-4 py-2 text-sm font-semibold transition">
+      <i class="fa-solid fa-rotate-left mr-2"></i>
+      Usar default
+    </button>
+  </div>
+</div>
+
+        <div class="flex flex-col sm:flex-row gap-3 pt-2">
+          <button id="test-alert-sound"
+                  type="button"
+                  class="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-4 py-2 font-semibold transition">
+            <i class="fa-solid fa-play mr-2"></i>
+            Probar sonido
+          </button>
+
+          <button id="save-alert-settings"
+                  type="button"
+                  class="flex-1 bg-gray-900 hover:bg-black text-white rounded-lg px-4 py-2 font-semibold transition">
+            <i class="fa-solid fa-floppy-disk mr-2"></i>
+            Guardar
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+<div id="sensor-pause-modal" class="modal-backdrop hidden items-center justify-center p-4 z-[1200]">
+  <div class="modal-panel bg-white dark:bg-[#090909] rounded-xl shadow-2xl w-full max-w-md p-5">
+    <div class="flex items-start justify-between gap-3 mb-4">
+      <div>
+        <h3 class="text-lg font-bold text-gray-100">
+          Pausar sensor
+        </h3>
+        <p id="pause-modal-subtitle" class="text-xs text-gray-400 mt-1">
+          Selecciona una opción
+        </p>
+      </div>
+
+      <button id="pause-modal-close" type="button" class="text-gray-400 hover:text-white">
+        <i class="fa-solid fa-xmark text-xl"></i>
+      </button>
+    </div>
+
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-4">
+      <button type="button" class="pause-quick-option pause-option-btn" data-minutes="60">
+        <i class="fa-regular fa-clock"></i>
+        1 hora
+      </button>
+
+      <button type="button" class="pause-quick-option pause-option-btn" data-minutes="180">
+        <i class="fa-regular fa-clock"></i>
+        3 horas
+      </button>
+
+      <button type="button" class="pause-quick-option pause-option-btn" data-minutes="1440">
+        <i class="fa-regular fa-calendar"></i>
+        24 horas
+      </button>
+    </div>
+
+    <button id="pause-indefinite-btn" type="button" class="pause-option-btn pause-indefinite w-full mb-4">
+      <i class="fa-solid fa-infinity"></i>
+      Pausar indefinidamente
+    </button>
+
+    <div class="rounded-xl border border-gray-800 p-4 bg-black/30">
+      <label for="pause-until-input" class="block text-sm font-bold text-gray-200 mb-2">
+        Pausar hasta fecha/hora
+      </label>
+
+      <input
+        id="pause-until-input"
+        type="datetime-local"
+        class="w-full rounded-lg border border-gray-700 bg-black text-gray-100 px-3 py-2 text-sm">
+
+      <label for="pause-message-input" class="block text-sm font-bold text-gray-200 mt-3 mb-2">
+        Motivo / comentario
+      </label>
+
+      <textarea
+        id="pause-message-input"
+        rows="2"
+        class="w-full rounded-lg border border-gray-700 bg-black text-gray-100 px-3 py-2 text-sm"
+        placeholder="Ej. Mantenimiento, cambio programado..."></textarea>
+
+      <button id="apply-pause-until-btn" type="button" class="pause-option-btn w-full mt-3">
+        <i class="fa-solid fa-calendar-check"></i>
+        Aplicar pausa hasta esa hora
+      </button>
+    </div>
+
+    <button id="pause-modal-resume-btn" type="button" class="pause-resume-btn w-full mt-4 hidden">
+      <i class="fa-solid fa-play"></i>
+      Reanudar escaneo
+    </button>
+  </div>
+</div>
+  <!-- Scripts: jQuery antes de Toastr -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.js"></script>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+  
+
+  <script src="{{ url_for('static', filename='dashboard.js') }}?v=20260920-mf3"></script>
+</body>
+</html>
