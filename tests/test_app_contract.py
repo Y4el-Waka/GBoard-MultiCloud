@@ -9,6 +9,13 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from prtg_client import PRTGClientError
+from sensor_control_service import (
+    SensorControlUpstreamError,
+    SensorControlValidationError,
+    SensorServerNotFoundError,
+)
+
 
 class ApplicationContractTests(unittest.TestCase):
     @classmethod
@@ -108,7 +115,7 @@ class ApplicationContractTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.client = self.flask_app.test_client()
-        self.app_module.cache_clear()
+        self.flask_app.history_service.clear()
 
     def _login(self):
         return self.client.post(
@@ -144,11 +151,17 @@ class ApplicationContractTests(unittest.TestCase):
     def test_unauthenticated_access_contract(self) -> None:
         dashboard = self.client.get("/dashboard")
         sensors = self.client.get("/api/sensors")
+        pause = self.client.post("/api/sensors/pause", json={})
+        resume = self.client.post("/api/sensors/resume", json={})
 
         self.assertEqual(dashboard.status_code, 302)
         self.assertTrue(dashboard.headers["Location"].endswith("/"))
         self.assertEqual(sensors.status_code, 401)
         self.assertEqual(sensors.get_json()["error"], "Sesion requerida")
+        self.assertEqual(pause.status_code, 401)
+        self.assertEqual(pause.get_json(), {"error": "Sesion requerida"})
+        self.assertEqual(resume.status_code, 401)
+        self.assertEqual(resume.get_json(), {"error": "Sesion requerida"})
 
     def test_valid_login_dashboard_and_me_contract(self) -> None:
         login = self._login()
@@ -239,6 +252,10 @@ class ApplicationContractTests(unittest.TestCase):
                 self.app_module.PRTGClient,
                 "resume",
             ) as resume,
+            mock.patch.object(
+                self.flask_app.history_service,
+                "clear",
+            ) as clear_history,
         ):
             paused = self.client.post(
                 "/api/sensors/pause",
@@ -296,10 +313,165 @@ class ApplicationContractTests(unittest.TestCase):
         self.assertTrue(resumed.get_json()["ok"])
         self.assertEqual(resume_call.args[0]["name"], "PRTG LAB 01")
         self.assertEqual(resume_call.args[1], 100001)
+        self.assertEqual(clear_history.call_count, 3)
+
+        with self.app_module.conn_db() as conn:
+            audit_rows = conn.execute(
+                """
+                SELECT action, target_id, target_name, detail
+                FROM audit_log
+                WHERE action IN ('sensor.pause', 'sensor.resume')
+                ORDER BY id DESC
+                LIMIT 3
+                """
+            ).fetchall()
+
+        audit_rows = list(reversed(audit_rows))
+        self.assertEqual(
+            [row["action"] for row in audit_rows],
+            ["sensor.pause", "sensor.pause", "sensor.resume"],
+        )
+        self.assertTrue(all(row["target_id"] == "100001" for row in audit_rows))
+        self.assertEqual(audit_rows[0]["target_name"], "Ping")
+        self.assertEqual(json.loads(audit_rows[0]["detail"])["mode"], "duration")
+        self.assertEqual(json.loads(audit_rows[1]["detail"])["mode"], "indefinite")
+
+    def test_history_endpoint_translates_history_service_errors(self) -> None:
+        self._login()
+        cases = (
+            (
+                self.app_module.HistoryServerNotFoundError(
+                    "Grupo 'DESCONOCIDO' no encontrado"
+                ),
+                404,
+                "Grupo 'DESCONOCIDO' no encontrado",
+            ),
+            (
+                self.app_module.HistoryValidationError(
+                    "minutes debe estar entre 5 y 1440"
+                ),
+                400,
+                "minutes debe estar entre 5 y 1440",
+            ),
+            (
+                self.app_module.HistoryUpstreamError(
+                    "No se pudo consultar PRTG"
+                ),
+                502,
+                "No se pudo consultar PRTG",
+            ),
+        )
+
+        for error, expected_status, expected_message in cases:
+            with self.subTest(error=type(error).__name__):
+                with mock.patch.object(
+                    self.flask_app.history_service,
+                    "get_history",
+                    side_effect=error,
+                ) as get_history:
+                    response = self.client.get(
+                        "/api/history?group=PRTG%20LAB%2001&id=100001"
+                    )
+
+                self.assertEqual(response.status_code, expected_status)
+                self.assertEqual(response.get_json(), {"error": expected_message})
+                get_history.assert_called_once_with(
+                    "PRTG LAB 01",
+                    100001,
+                    minutes=120,
+                    average_seconds=300,
+                )
+
+    def test_sensor_control_domain_errors_preserve_http_contract(self) -> None:
+        self._login()
+
+        with self.app_module.conn_db() as conn:
+            audit_count_before = conn.execute(
+                "SELECT COUNT(*) FROM audit_log WHERE action LIKE 'sensor.%'"
+            ).fetchone()[0]
+
+        pause_cases = (
+            (
+                SensorServerNotFoundError("Grupo desconocido"),
+                404,
+                "Grupo desconocido",
+            ),
+            (
+                SensorControlValidationError(
+                    "duration_minutes debe ser numerico"
+                ),
+                400,
+                "duration_minutes debe ser numerico",
+            ),
+            (
+                SensorControlUpstreamError("sanitized upstream failure"),
+                502,
+                "No se pudo pausar el sensor en PRTG",
+            ),
+        )
+
+        for error, expected_status, expected_message in pause_cases:
+            with self.subTest(operation="pause", error=type(error).__name__):
+                with mock.patch.object(
+                    self.flask_app.sensor_control_service,
+                    "pause_for",
+                    side_effect=error,
+                ):
+                    response = self.client.post(
+                        "/api/sensors/pause",
+                        json={
+                            "group": "PRTG LAB 01",
+                            "id": 100001,
+                            "duration_minutes": 60,
+                        },
+                    )
+
+                self.assertEqual(response.status_code, expected_status)
+                self.assertEqual(response.get_json(), {"error": expected_message})
+
+        resume_cases = (
+            (
+                SensorServerNotFoundError("Grupo desconocido"),
+                404,
+                "Grupo desconocido",
+            ),
+            (
+                SensorControlValidationError("id debe ser numerico"),
+                400,
+                "id debe ser numerico",
+            ),
+            (
+                SensorControlUpstreamError("sanitized upstream failure"),
+                502,
+                "No se pudo reanudar el sensor en PRTG",
+            ),
+        )
+
+        for error, expected_status, expected_message in resume_cases:
+            with self.subTest(operation="resume", error=type(error).__name__):
+                with mock.patch.object(
+                    self.flask_app.sensor_control_service,
+                    "resume",
+                    side_effect=error,
+                ):
+                    response = self.client.post(
+                        "/api/sensors/resume",
+                        json={"group": "PRTG LAB 01", "id": 100001},
+                    )
+
+                self.assertEqual(response.status_code, expected_status)
+                self.assertEqual(response.get_json(), {"error": expected_message})
+
+        with self.app_module.conn_db() as conn:
+            audit_count_after = conn.execute(
+                "SELECT COUNT(*) FROM audit_log WHERE action LIKE 'sensor.%'"
+            ).fetchone()[0]
+
+        self.assertEqual(audit_count_after, audit_count_before)
 
     def test_prtg_client_errors_preserve_gateway_responses(self) -> None:
         self._login()
-        transport_error = self.app_module.PRTGClientError(
+        transport_error = PRTGClientError(
             "sanitized synthetic failure"
         )
 

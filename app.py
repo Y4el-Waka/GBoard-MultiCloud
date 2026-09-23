@@ -8,10 +8,8 @@ import re
 import secrets
 import sqlite3
 import math
-from collections import OrderedDict
 from datetime import UTC,datetime, timedelta
 from functools import wraps
-from threading import RLock
 from typing import Any
 from urllib.parse import urlparse
 
@@ -38,7 +36,19 @@ from flask import (
     session,
     url_for,
 )
-from prtg_client import PRTGClient, PRTGClientError
+from history_service import (
+    HistoryServerNotFoundError,
+    HistoryService,
+    HistoryUpstreamError,
+    HistoryValidationError,
+)
+from prtg_client import PRTGClient
+from sensor_control_service import (
+    SensorControlService,
+    SensorControlUpstreamError,
+    SensorControlValidationError,
+    SensorServerNotFoundError,
+)
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
@@ -56,7 +66,6 @@ PORT = APP_SETTINGS.port
 ADMIN_ROLES = {"admin", "admon"}
 DELETE_USER_ROLES = {"admon"}
 
-HISTORY_CACHE_MAX_ENTRIES = APP_SETTINGS.history_cache_max_entries
 ALERT_SOUND_DIR = APP_SETTINGS.alert_sound_dir
 ALERT_SOUND_MAX_BYTES = APP_SETTINGS.alert_sound_max_bytes
 
@@ -193,60 +202,6 @@ def find_server_index_by_id(servers: list[dict[str, Any]], server_id: str) -> in
 
     return None
 
-def get_prtg_server_or_reload(app: Flask, group: str) -> dict[str, Any] | None:
-    server = app.prtg_servers.get(group)  # type: ignore[attr-defined]
-
-    if server:
-        return server
-
-    app.prtg_servers = load_prtg_servers(app)  # type: ignore[attr-defined]
-    return app.prtg_servers.get(group)  # type: ignore[attr-defined]
-
-
-def prtg_pause_sensor(
-    app: Flask,
-    group: str,
-    sensor_id: int,
-    duration_minutes: int,
-    pause_message: str,
-) -> None:
-    server = get_prtg_server_or_reload(app, group)
-
-    if not server:
-        raise LookupError(f"Grupo '{group}' no encontrado")
-
-    duration_minutes = max(
-        1,
-        min(int(duration_minutes), 365 * 24 * 60),
-    )
-
-    with new_prtg_client(app) as client:
-        client.pause_for(
-            server,
-            sensor_id,
-            duration_minutes,
-            pause_message or "Pausado desde dashboard",
-        )
-
-
-def prtg_pause_sensor_indefinitely(
-    app: Flask,
-    group: str,
-    sensor_id: int,
-    pause_message: str,
-) -> None:
-    server = get_prtg_server_or_reload(app, group)
-
-    if not server:
-        raise LookupError(f"Grupo '{group}' no encontrado")
-
-    with new_prtg_client(app) as client:
-        client.pause_indefinitely(
-            server,
-            sensor_id,
-            pause_message or "Pausado indefinidamente desde dashboard",
-        )
-
 def parse_pause_until_minutes(value: str) -> tuple[int, str]:
     raw = str(value or "").strip()
 
@@ -268,19 +223,6 @@ def parse_pause_until_minutes(value: str) -> tuple[int, str]:
     minutes = max(1, math.ceil(seconds / 60))
 
     return minutes, target.strftime("%Y-%m-%d %H:%M:%S")
-
-def prtg_resume_sensor(
-    app: Flask,
-    group: str,
-    sensor_id: int,
-) -> None:
-    server = get_prtg_server_or_reload(app, group)
-
-    if not server:
-        raise LookupError(f"Grupo '{group}' no encontrado")
-
-    with new_prtg_client(app) as client:
-        client.resume(server, sensor_id)
 
 def update_prtg_server(
     server_id: str,
@@ -353,65 +295,6 @@ def delete_prtg_server(server_id: str) -> dict[str, Any]:
     write_servers_file(servers)
 
     return deleted
-
-# -------------------- Cache de historicos con limite --------------------
-_HISTORY_CACHE: OrderedDict[str, tuple[datetime, dict[str, Any]]] = OrderedDict()
-_HISTORY_CACHE_LOCK = RLock()
-
-
-def cache_cleanup() -> None:
-    now = datetime.utcnow()
-
-    with _HISTORY_CACHE_LOCK:
-        expired_keys = [
-            key
-            for key, (expires_at, _) in _HISTORY_CACHE.items()
-            if expires_at < now
-        ]
-
-        for key in expired_keys:
-            _HISTORY_CACHE.pop(key, None)
-
-
-def cache_get(key: str) -> dict[str, Any] | None:
-    now = datetime.utcnow()
-
-    with _HISTORY_CACHE_LOCK:
-        item = _HISTORY_CACHE.get(key)
-
-        if not item:
-            return None
-
-        expires_at, payload = item
-
-        if expires_at < now:
-            _HISTORY_CACHE.pop(key, None)
-            return None
-
-        _HISTORY_CACHE.move_to_end(key)
-        return payload
-
-
-def cache_set(key: str, value: dict[str, Any], ttl_sec: int = 60) -> None:
-    expires_at = datetime.utcnow() + timedelta(seconds=ttl_sec)
-
-    with _HISTORY_CACHE_LOCK:
-        _HISTORY_CACHE[key] = (expires_at, value)
-        _HISTORY_CACHE.move_to_end(key)
-
-        while len(_HISTORY_CACHE) > HISTORY_CACHE_MAX_ENTRIES:
-            _HISTORY_CACHE.popitem(last=False)
-
-
-def cache_clear() -> None:
-    with _HISTORY_CACHE_LOCK:
-        _HISTORY_CACHE.clear()
-
-
-def cache_size() -> int:
-    with _HISTORY_CACHE_LOCK:
-        return len(_HISTORY_CACHE)
-
 
 # -------------------- DB helpers --------------------
 def conn_db() -> sqlite3.Connection:
@@ -1597,397 +1480,6 @@ def admon_required(view):
     return wrapper
 
 
-# -------------------- CSV historico PRTG --------------------
-def parse_prtg_float(value: str) -> float | None:
-    if not value:
-        return None
-
-    clean = value.strip().replace("\u00a0", " ")
-    match = re.search(r"[-+]?\d[\d.,]*", clean)
-
-    if not match:
-        return None
-
-    number = match.group(0)
-
-    if "," in number and "." in number:
-        if number.rfind(",") > number.rfind("."):
-            number = number.replace(".", "").replace(",", ".")
-        else:
-            number = number.replace(",", "")
-
-    elif "," in number:
-        left, right = number.rsplit(",", 1)
-
-        if len(right) == 3 and len(left) >= 1:
-            number = left + right
-        else:
-            number = left + "." + right
-
-    try:
-        return float(number)
-    except ValueError:
-        return None
-
-def parse_history_csv(text: str) -> dict[str, Any]:
-    """
-    Parser robusto para /api/historicdata.csv de PRTG.
-
-    Devuelve compatibilidad actual:
-    - series: serie principal
-    - unit
-    - count
-    - column
-
-    Y además devuelve multi-serie:
-    - datasets: ping, minimum, maximum, packet_loss, downtime, coverage si existen
-    """
-    if not text or not text.strip():
-        return {
-            "series": [],
-            "datasets": [],
-            "unit": "",
-            "count": 0,
-            "error": "Respuesta historica vacia",
-        }
-
-    lower_text = text[:500].lower()
-
-    if "<html" in lower_text or "<!doctype" in lower_text:
-        return {
-            "series": [],
-            "datasets": [],
-            "unit": "",
-            "count": 0,
-            "error": "PRTG regreso HTML en lugar de CSV. Revisa credenciales o permisos.",
-        }
-
-    sample = text[:4096]
-
-    try:
-        dialect = csv.Sniffer().sniff(sample, delimiters=";,\t")
-    except csv.Error:
-        dialect = csv.excel
-        dialect.delimiter = ";"
-
-    rows = list(csv.reader(io.StringIO(text.replace("\r", "")), dialect))
-    rows = [
-        [str(cell).strip().strip('"') for cell in row]
-        for row in rows
-        if any(str(cell).strip() for cell in row)
-    ]
-
-    if len(rows) < 2:
-        return {
-            "series": [],
-            "datasets": [],
-            "unit": "",
-            "count": 0,
-            "error": "CSV historico sin filas suficientes",
-        }
-
-    def normalize_header(value: str) -> str:
-        return (
-            str(value or "")
-            .strip()
-            .lower()
-            .replace("\ufeff", "")
-            .replace("á", "a")
-            .replace("é", "e")
-            .replace("í", "i")
-            .replace("ó", "o")
-            .replace("ú", "u")
-            .replace("ñ", "n")
-        )
-
-    def strip_raw(value: str) -> str:
-        value = normalize_header(value)
-        return re.sub(r"\s*\(raw\)\s*$", "", value).strip()
-
-    time_header_names = {
-        "date time",
-        "datetime",
-        "date/time",
-        "fecha hora",
-        "fecha/hora",
-        "fecha",
-    }
-
-    header_idx = None
-
-    for idx, row in enumerate(rows):
-        normalized = [strip_raw(cell) for cell in row]
-
-        if any(cell in time_header_names for cell in normalized):
-            header_idx = idx
-            break
-
-    if header_idx is None:
-        return {
-            "series": [],
-            "datasets": [],
-            "unit": "",
-            "count": 0,
-            "error": "No se encontro columna Date Time / Fecha Hora en CSV historico",
-            "preview": rows[:5],
-        }
-
-    header = rows[header_idx]
-    data_rows = rows[header_idx + 1:]
-
-    normalized_header = [normalize_header(cell) for cell in header]
-    base_header = [strip_raw(cell) for cell in header]
-
-    time_idx = None
-    time_raw_idx = None
-
-    for idx, col in enumerate(base_header):
-        raw_col = normalized_header[idx]
-
-        if col in time_header_names and "(raw)" not in raw_col:
-            time_idx = idx
-            break
-
-    for idx, col in enumerate(base_header):
-        raw_col = normalized_header[idx]
-
-        if col in time_header_names and "(raw)" in raw_col:
-            time_raw_idx = idx
-            break
-
-    if time_idx is None and time_raw_idx is not None:
-        time_idx = time_raw_idx
-
-    if time_idx is None:
-        time_idx = 0
-
-    def is_time_column(idx: int) -> bool:
-        col = base_header[idx] if idx < len(base_header) else ""
-        raw_col = normalized_header[idx] if idx < len(normalized_header) else ""
-
-        if col in time_header_names:
-            return True
-
-        return "fecha hora" in raw_col or "date time" in raw_col
-
-    def parse_excel_serial_date(value: str) -> datetime | None:
-        try:
-            serial = float(str(value).replace(",", "."))
-        except (TypeError, ValueError):
-            return None
-
-        return datetime(1899, 12, 30) + timedelta(days=serial)
-
-    date_formats = [
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%d-%H-%M-%S",
-        "%m/%d/%Y %I:%M:%S %p",
-        "%m/%d/%Y %H:%M:%S",
-        "%d/%m/%Y %H:%M:%S",
-        "%d/%m/%Y %I:%M:%S %p",
-        "%d.%m.%Y %H:%M:%S",
-        "%d.%m.%Y %I:%M:%S %p",
-    ]
-
-    def parse_prtg_time(row: list[str]) -> datetime | None:
-        raw_time = ""
-
-        if time_idx is not None and time_idx < len(row):
-            raw_time = str(row[time_idx]).strip().strip('"')
-
-        # Ejemplo: 06.05.2026 03:35:00 - 03:40:00
-        if " - " in raw_time:
-            raw_time = raw_time.split(" - ", 1)[0].strip()
-
-        for fmt in date_formats:
-            try:
-                return datetime.strptime(raw_time, fmt)
-            except ValueError:
-                pass
-
-        try:
-            return datetime.fromisoformat(raw_time.replace("Z", ""))
-        except ValueError:
-            pass
-
-        if time_raw_idx is not None and time_raw_idx < len(row):
-            parsed_raw = parse_excel_serial_date(row[time_raw_idx])
-
-            if parsed_raw:
-                return parsed_raw
-
-        return None
-
-    def has_numeric_values(idx: int) -> bool:
-        return any(
-            idx < len(row) and parse_prtg_float(row[idx]) is not None
-            for row in data_rows[:80]
-        )
-
-    def classify_column(base_name: str) -> tuple[str, str, str, int] | None:
-        """
-        Regresa:
-        key, label, unit, priority
-        """
-        name = strip_raw(base_name)
-
-        if name in {"coverage", "cobertura"}:
-            return ("coverage", "Cobertura", "%", 60)
-
-        if any(word in name for word in ["tiempo de ping", "ping time", "ping"]):
-            return ("ping", "Tiempo de Ping", "ms", 10)
-
-        if any(word in name for word in ["minimo", "minimum"]):
-            return ("minimum", "Mínimo", "ms", 20)
-
-        if any(word in name for word in ["maximo", "maximum"]):
-            return ("maximum", "Máximo", "ms", 30)
-
-        if any(word in name for word in ["perdida de paquetes", "packet loss", "packetloss"]):
-            return ("packet_loss", "Pérdida de paquetes", "%", 40)
-
-        if any(word in name for word in ["tiempo de inactividad", "downtime", "inactividad"]):
-            return ("downtime", "Tiempo de inactividad", "%", 50)
-
-        return None
-
-    candidate_columns: list[dict[str, Any]] = []
-
-    for idx, colname in enumerate(header):
-        if idx == time_idx or idx == time_raw_idx:
-            continue
-
-        if is_time_column(idx):
-            continue
-
-        normalized = normalized_header[idx]
-        classified = classify_column(colname)
-
-        if not classified:
-            continue
-
-        if not has_numeric_values(idx):
-            continue
-
-        key, label, unit, priority = classified
-
-        # Preferimos RAW para graficar, pero si solo existe la columna normal también sirve.
-        raw_bonus = -1 if "(raw)" in normalized else 0
-
-        candidate_columns.append(
-            {
-                "idx": idx,
-                "key": key,
-                "label": label,
-                "unit": unit,
-                "priority": priority + raw_bonus,
-                "column": colname,
-                "is_raw": "(raw)" in normalized,
-            }
-        )
-
-    # Si una misma métrica aparece normal y RAW, nos quedamos con RAW.
-    selected_by_key: dict[str, dict[str, Any]] = {}
-
-    for candidate in sorted(candidate_columns, key=lambda item: item["priority"]):
-        key = candidate["key"]
-
-        if key not in selected_by_key:
-            selected_by_key[key] = candidate
-            continue
-
-        current = selected_by_key[key]
-
-        if candidate["is_raw"] and not current["is_raw"]:
-            selected_by_key[key] = candidate
-
-    selected_columns = sorted(
-        selected_by_key.values(),
-        key=lambda item: item["priority"],
-    )
-
-    if not selected_columns:
-        return {
-            "series": [],
-            "datasets": [],
-            "unit": "",
-            "count": 0,
-            "error": "No se encontraron columnas historicas utiles para graficar.",
-            "header": header,
-            "preview": rows[:5],
-        }
-
-    datasets: list[dict[str, Any]] = []
-
-    for column in selected_columns:
-        points: list[dict[str, Any]] = []
-        idx = column["idx"]
-
-        for row in data_rows:
-            if len(row) <= idx:
-                continue
-
-            parsed_time = parse_prtg_time(row)
-            value = parse_prtg_float(str(row[idx]))
-
-            if parsed_time is None or value is None:
-                continue
-
-            points.append(
-                {
-                    "t": parsed_time.isoformat(),
-                    "value": value,
-                }
-            )
-
-        if not points:
-            continue
-
-        axis = "y1" if column["unit"] == "%" else "y"
-
-        datasets.append(
-            {
-                "key": column["key"],
-                "label": column["label"],
-                "unit": column["unit"],
-                "axis": axis,
-                "column": column["column"],
-                "data": points,
-            }
-        )
-
-    if not datasets:
-        return {
-            "series": [],
-            "datasets": [],
-            "unit": "",
-            "count": 0,
-            "error": "Las columnas historicas existen, pero no se pudieron convertir puntos.",
-            "header": header,
-            "preview": rows[:5],
-        }
-
-    primary_priority = ["ping", "minimum", "maximum", "packet_loss", "downtime", "coverage"]
-
-    primary_dataset = datasets[0]
-
-    for key in primary_priority:
-        match = next((item for item in datasets if item["key"] == key), None)
-
-        if match:
-            primary_dataset = match
-            break
-
-    return {
-        "series": primary_dataset["data"],
-        "datasets": datasets,
-        "unit": primary_dataset["unit"],
-        "count": len(primary_dataset["data"]),
-        "column": primary_dataset["column"],
-        "header": header,
-        "error": "",
-    }
-
 # -------------------- App factory --------------------
 def create_app() -> Flask:
     app = Flask(__name__, static_folder="static", template_folder="templates")
@@ -2015,6 +1507,30 @@ def create_app() -> Flask:
     seed_default_users(app)
 
     app.prtg_servers = load_prtg_servers(app)  # type: ignore[attr-defined]
+
+    def current_history_servers():
+        return app.prtg_servers  # type: ignore[attr-defined]
+
+    def reload_history_servers():
+        app.prtg_servers = load_prtg_servers(app)  # type: ignore[attr-defined]
+        return app.prtg_servers  # type: ignore[attr-defined]
+
+    app.history_service = HistoryService(  # type: ignore[attr-defined]
+        server_provider=current_history_servers,
+        server_reloader=reload_history_servers,
+        client_factory=lambda: new_prtg_client(app),
+        cache_ttl_seconds=app.config["HISTORY_CACHE_TTL"],
+        cache_max_entries=APP_SETTINGS.history_cache_max_entries,
+        logger=app.logger,
+    )
+
+    app.sensor_control_service = SensorControlService(  # type: ignore[attr-defined]
+        server_provider=current_history_servers,
+        server_reloader=reload_history_servers,
+        client_factory=lambda: new_prtg_client(app),
+        history_service=app.history_service,  # type: ignore[attr-defined]
+        logger=app.logger,
+    )
 
     @app.cli.command("audit-list")
     @click.option("--limit", default=20, show_default=True)
@@ -2404,59 +1920,22 @@ def create_app() -> Flask:
         if not group or not sensor_id:
             return jsonify({"error": "group e id son obligatorios"}), 400
 
-        server = app.prtg_servers.get(group)  # type: ignore[attr-defined]
-
-        if not server:
-            app.prtg_servers = load_prtg_servers(app)  # type: ignore[attr-defined]
-            server = app.prtg_servers.get(group)  # type: ignore[attr-defined]
-
-        if not server:
-            return jsonify({"error": f"Grupo '{group}' no encontrado"}), 404
-
-        key = f"{group}:{sensor_id}:{minutes}:{avg}"
-        cached = cache_get(key)
-
-        if cached:
-            return jsonify(cached)
-
-        end = datetime.now()
-        start = end - timedelta(minutes=minutes)
-
         try:
-            with new_prtg_client(app) as client:
-                historical_csv = client.get_historic_csv(
-                    server,
-                    sensor_id,
-                    start,
-                    end,
-                    average_seconds=avg,
-                )
-
-            payload = parse_history_csv(historical_csv)
-
-            if not payload.get("series"):
-                app.logger.warning(
-                    "Historico sin puntos group=%s sensor=%s avg=%s status=%s error=%s preview=%s",
-                    group,
-                    sensor_id,
-                    avg,
-                    200,
-                    payload.get("error"),
-                    historical_csv[:300],
-                )
-
-            cache_set(key, payload, ttl_sec=app.config["HISTORY_CACHE_TTL"])
-
-            return jsonify(payload)
-
-        except PRTGClientError as exc:
-            app.logger.warning(
-                "Error consultando historico PRTG %s/%s: %s",
+            payload = app.history_service.get_history(  # type: ignore[attr-defined]
                 group,
                 sensor_id,
-                exc,
+                minutes=minutes,
+                average_seconds=avg,
             )
+            return jsonify(payload)
 
+        except HistoryServerNotFoundError as exc:
+            return jsonify({"error": str(exc)}), 404
+
+        except HistoryValidationError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+        except HistoryUpstreamError:
             return jsonify({"error": "No se pudo consultar PRTG"}), 502
 
 
@@ -2493,11 +1972,10 @@ def create_app() -> Flask:
             if indefinite:
                 mode = "indefinite"
 
-                prtg_pause_sensor_indefinitely(
-                    app=app,
-                    group=group,
-                    sensor_id=sensor_id,
-                    pause_message=message,
+                app.sensor_control_service.pause_indefinitely(  # type: ignore[attr-defined]
+                    group,
+                    sensor_id,
+                    message,
                 )
 
                 response_message = "Sensor pausado indefinidamente"
@@ -2507,19 +1985,13 @@ def create_app() -> Flask:
                     duration_minutes, until_label = parse_pause_until_minutes(pause_until)
                     mode = "until"
                 else:
-                    try:
-                        duration_minutes = int(duration_minutes or 60)
-                    except (TypeError, ValueError):
-                        return jsonify({"error": "duration_minutes debe ser numerico"}), 400
+                    duration_minutes = duration_minutes or 60
 
-                duration_minutes = max(1, min(int(duration_minutes), 365 * 24 * 60))
-
-                prtg_pause_sensor(
-                    app=app,
-                    group=group,
-                    sensor_id=sensor_id,
-                    duration_minutes=duration_minutes,
-                    pause_message=message,
+                duration_minutes = app.sensor_control_service.pause_for(  # type: ignore[attr-defined]
+                    group,
+                    sensor_id,
+                    duration_minutes,
+                    message,
                 )
 
                 response_message = (
@@ -2545,8 +2017,6 @@ def create_app() -> Flask:
                 },
             )
 
-            cache_clear()
-
             return jsonify(
                 {
                     "ok": True,
@@ -2554,14 +2024,13 @@ def create_app() -> Flask:
                 }
             )
 
-        except LookupError as exc:
+        except SensorServerNotFoundError as exc:
             return jsonify({"error": str(exc)}), 404
 
-        except ValueError as exc:
+        except (SensorControlValidationError, ValueError) as exc:
             return jsonify({"error": str(exc)}), 400
 
-        except PRTGClientError as exc:
-            app.logger.warning("Error pausando sensor PRTG %s/%s: %s", group, sensor_id, exc)
+        except SensorControlUpstreamError:
             return jsonify({"error": "No se pudo pausar el sensor en PRTG"}), 502
 
     @app.route("/api/sensors/resume", methods=["POST"])
@@ -2583,10 +2052,9 @@ def create_app() -> Flask:
             return jsonify({"error": "group e id son obligatorios"}), 400
 
         try:
-            prtg_resume_sensor(
-                app=app,
-                group=group,
-                sensor_id=sensor_id,
+            app.sensor_control_service.resume(  # type: ignore[attr-defined]
+                group,
+                sensor_id,
             )
 
             log_audit(
@@ -2601,8 +2069,6 @@ def create_app() -> Flask:
                 },
             )
 
-            cache_clear()
-
             return jsonify(
                 {
                     "ok": True,
@@ -2610,11 +2076,13 @@ def create_app() -> Flask:
                 }
             )
 
-        except LookupError as exc:
+        except SensorServerNotFoundError as exc:
             return jsonify({"error": str(exc)}), 404
 
-        except PRTGClientError as exc:
-            app.logger.warning("Error reanudando sensor PRTG %s/%s: %s", group, sensor_id, exc)
+        except SensorControlValidationError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+        except SensorControlUpstreamError:
             return jsonify({"error": "No se pudo reanudar el sensor en PRTG"}), 502
 
 
@@ -2674,7 +2142,7 @@ def create_app() -> Flask:
             )
 
             app.prtg_servers = load_prtg_servers(app)  # type: ignore[attr-defined]
-            cache_clear()
+            app.history_service.clear()
             log_audit(
                 action="server.create",
                 target_type="server",
@@ -2710,7 +2178,7 @@ def create_app() -> Flask:
             )
 
             app.prtg_servers = load_prtg_servers(app)  # type: ignore[attr-defined]
-            cache_clear()
+            app.history_service.clear()
             log_audit(
                 action="server.update",
                 target_type="server",
@@ -2746,7 +2214,7 @@ def create_app() -> Flask:
             deleted = delete_prtg_server(server_id)
 
             app.prtg_servers = load_prtg_servers(app)  # type: ignore[attr-defined]
-            cache_clear()
+            app.history_service.clear()
             log_audit(
                 action="server.delete",
                 target_type="server",
@@ -2963,7 +2431,7 @@ def create_app() -> Flask:
 
     @app.route("/healthz")
     def healthz():
-        cache_cleanup()
+        app.history_service.cleanup()
 
         data_file_size = DATA_FILE.stat().st_size if DATA_FILE.exists() else 0
         data_file_mtime = datetime.fromtimestamp(DATA_FILE.stat().st_mtime).isoformat() if DATA_FILE.exists() else None
@@ -2975,8 +2443,8 @@ def create_app() -> Flask:
                 "data_file_size_bytes": data_file_size,
                 "data_file_mtime": data_file_mtime,
                 "servers": len(app.prtg_servers),  # type: ignore[attr-defined]
-                "history_cache_entries": cache_size(),
-                "history_cache_max_entries": HISTORY_CACHE_MAX_ENTRIES,
+                "history_cache_entries": app.history_service.cache_size(),
+                "history_cache_max_entries": app.history_service.cache_max_entries,
             }
         )
 
