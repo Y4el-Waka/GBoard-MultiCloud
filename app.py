@@ -8,17 +8,26 @@ import re
 import secrets
 import sqlite3
 import math
-import tempfile
 from collections import OrderedDict
 from datetime import UTC,datetime, timedelta
 from functools import wraps
-from pathlib import Path
 from threading import RLock
 from typing import Any
 from urllib.parse import urlparse
 
 import click
 import requests
+from config import (
+    BASE_DIR,
+    load_app_prtg_servers,
+    load_app_settings,
+    load_environment,
+    new_server_id,
+    parse_config_bool as bool_from_config,
+    read_servers_file,
+    servers_json_is_configured,
+    write_servers_file,
+)
 from flask import (
     Flask,
     has_request_context,
@@ -35,76 +44,43 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 
-BASE_DIR = Path(__file__).resolve().parent
-
-try:
-    from dotenv import load_dotenv
-except ImportError:
-    load_dotenv = None
-
-if load_dotenv is not None:
-    load_dotenv(BASE_DIR / ".env")
+load_environment()
+APP_SETTINGS = load_app_settings()
+SHARED_SETTINGS = APP_SETTINGS.shared
 
 
 # -------------------- Base config --------------------
-DB_PATH = Path(os.getenv("DB_PATH", BASE_DIR / "usuarios.db"))
-DATA_FILE = Path(os.getenv("OUTPUT_PATH", BASE_DIR / "estado_sensores_prtg.json"))
-PORT = int(os.getenv("PORT", "5067"))
+DB_PATH = SHARED_SETTINGS.db_path
+DATA_FILE = SHARED_SETTINGS.output_path
+PORT = APP_SETTINGS.port
 
 ADMIN_ROLES = {"admin", "admon"}
 DELETE_USER_ROLES = {"admon"}
 
-HISTORY_CACHE_MAX_ENTRIES = int(os.getenv("HISTORY_CACHE_MAX_ENTRIES", "500"))
-ALERT_SOUND_DIR = BASE_DIR / "static" / "uploads" / "alert_sounds"
-ALERT_SOUND_MAX_BYTES = int(os.getenv("ALERT_SOUND_MAX_BYTES", str(5 * 1024 * 1024)))
+HISTORY_CACHE_MAX_ENTRIES = APP_SETTINGS.history_cache_max_entries
+ALERT_SOUND_DIR = APP_SETTINGS.alert_sound_dir
+ALERT_SOUND_MAX_BYTES = APP_SETTINGS.alert_sound_max_bytes
 
-SENSOR_EVENT_RETENTION_DAYS = int(os.getenv("SENSOR_EVENT_RETENTION_DAYS", "90"))
-AUDIT_LOG_MAX_LIMIT = int(os.getenv("AUDIT_LOG_MAX_LIMIT", "500"))
+SENSOR_EVENT_RETENTION_DAYS = SHARED_SETTINGS.event_retention_days
+AUDIT_LOG_MAX_LIMIT = APP_SETTINGS.audit_log_max_limit
 EXPORT_LOG_WINDOWS = {12, 24, 72}
 
-
-# -------------------- Config helpers --------------------
-def env_bool(name: str, default: bool = False) -> bool:
-    value = os.getenv(name)
-
-    if value is None:
-        return default
-
-    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
-
-
-def get_env(name: str, default: str | None = None, required: bool = False) -> str | None:
-    value = os.getenv(name, default)
-
-    if required and not value:
-        raise RuntimeError(f"Missing env var: {name}")
-
-    return value
-
-
-def resolve_path(path_value: str | os.PathLike[str]) -> Path:
-    path = Path(path_value)
-    return path if path.is_absolute() else (BASE_DIR / path).resolve()
-
-
-def get_servers_file_path() -> Path:
-    return resolve_path(os.getenv("PRTG_SERVERS_FILE", "servers.json"))
 
 
 def create_http_session() -> requests.Session:
     session_http = requests.Session()
 
     retries = Retry(
-        total=int(os.getenv("HTTP_RETRIES", "3")),
-        backoff_factor=float(os.getenv("HTTP_BACKOFF", "0.5")),
+        total=SHARED_SETTINGS.http.retries,
+        backoff_factor=SHARED_SETTINGS.http.backoff,
         status_forcelist=[429, 500, 502, 503, 504],
         allowed_methods=["GET"],
     )
 
     adapter = HTTPAdapter(
         max_retries=retries,
-        pool_connections=int(os.getenv("HTTP_POOL_CONNECTIONS", "20")),
-        pool_maxsize=int(os.getenv("HTTP_POOL_MAXSIZE", "50")),
+        pool_connections=SHARED_SETTINGS.http.pool_connections,
+        pool_maxsize=SHARED_SETTINGS.http.pool_maxsize,
     )
 
     session_http.mount("http://", adapter)
@@ -139,101 +115,7 @@ def bool_from_payload(value: Any) -> bool:
     return False
 
 
-def bool_from_config(value: Any, default: bool = True) -> bool:
-    if value is None:
-        return default
-
-    if isinstance(value, bool):
-        return value
-
-    if isinstance(value, int):
-        return value == 1
-
-    if isinstance(value, str):
-        return value.strip().lower() not in {"0", "false", "no", "n", "off", "inactive", "inactivo", "disabled"}
-
-    return default
-
-
-def new_server_id() -> str:
-    return f"srv_{secrets.token_hex(8)}"
-
-
 # -------------------- PRTG server config --------------------
-def read_servers_file() -> list[dict[str, Any]]:
-    path = get_servers_file_path()
-
-    if not path.exists():
-        return []
-
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Archivo de servidores invalido: {exc}") from exc
-
-    if not isinstance(payload, list):
-        raise ValueError("El archivo de servidores debe ser una lista JSON")
-
-    clean_servers: list[dict[str, Any]] = []
-    changed = False
-    used_ids: set[str] = set()
-
-    for item in payload:
-        if not isinstance(item, dict):
-            changed = True
-            continue
-
-        server = dict(item)
-
-        if not server.get("id"):
-            server["id"] = new_server_id()
-            changed = True
-
-        server_id = str(server["id"]).strip()
-
-        if not server_id or server_id in used_ids:
-            server["id"] = new_server_id()
-            changed = True
-
-        used_ids.add(str(server["id"]))
-
-        if not server.get("type"):
-            server["type"] = "prtg"
-            changed = True
-
-        if "enabled" not in server:
-            server["enabled"] = True
-            changed = True
-
-        clean_servers.append(server)
-
-    if changed:
-        write_servers_file(clean_servers)
-
-    return clean_servers
-
-def write_servers_file(servers: list[dict[str, Any]]) -> None:
-    path = get_servers_file_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    fd, tmp_name = tempfile.mkstemp(
-        prefix="servers_",
-        suffix=".json",
-        dir=str(path.parent),
-    )
-
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(servers, handle, ensure_ascii=False, indent=2)
-            handle.write("\n")
-
-        os.replace(tmp_name, path)
-
-    finally:
-        if os.path.exists(tmp_name):
-            os.unlink(tmp_name)
-
-
 def normalize_prtg_url(raw_url: str) -> str:
     url = raw_url.strip()
 
@@ -269,72 +151,12 @@ def safe_server(server: dict[str, Any]) -> dict[str, Any]:
     }
 
 def load_prtg_servers(app: Flask | None = None) -> dict[str, dict[str, Any]]:
-    raw = (os.getenv("PRTG_SERVERS_JSON") or "").strip()
-    source = "PRTG_SERVERS_JSON"
-
-    if not raw:
-        path = get_servers_file_path()
-        source = str(path)
-
-        if path.is_file():
-            raw = path.read_text(encoding="utf-8")
-
-    if not raw:
-        if app:
-            app.logger.warning("No se configuraron servidores PRTG.")
-        return {}
-
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        if app:
-            app.logger.error("Configuracion de PRTG invalida en %s: %s", source, exc)
-        return {}
-
-    if not isinstance(data, list):
-        if app:
-            app.logger.error("Configuracion de PRTG invalida en %s: debe ser lista JSON", source)
-        return {}
-
-    servers: dict[str, dict[str, Any]] = {}
-
-    for idx, server in enumerate(data, start=1):
-        if not isinstance(server, dict):
-            if app:
-                app.logger.warning("Servidor PRTG #%s ignorado: no es objeto JSON.", idx)
-            continue
-
-        name = str(server.get("name", "")).strip()
-        url = str(server.get("url", "")).strip().rstrip("/")
-        username = str(server.get("username", "")).strip()
-        has_secret = bool(server.get("password") or server.get("passhash"))
-
-        if not (name and url and username and has_secret):
-            if app:
-                app.logger.warning("Servidor PRTG #%s ignorado por configuracion incompleta.", idx)
-            continue
-
-        servers[name] = {
-            **server,
-            "id": server.get("id", ""),
-            "type": "prtg",
-            "enabled": True,
-            "name": name,
-            "url": url,
-            "username": username,
-        }
-        if not bool_from_config(server.get("enabled", True), default=True):
-            continue
-
-        server_type = str(server.get("type", "prtg")).strip().lower()
-        if server_type != "prtg":
-            continue
-
-    return servers
+    logger = app.logger if app else None
+    return load_app_prtg_servers(logger)
 
 
 def add_prtg_server(name: str, url: str, username: str, password: str) -> dict[str, Any]:
-    if os.getenv("PRTG_SERVERS_JSON"):
+    if servers_json_is_configured():
         raise ValueError("Para agregar servidores desde la UI usa PRTG_SERVERS_FILE, no PRTG_SERVERS_JSON")
 
     normalized_url = normalize_prtg_url(url)
@@ -524,7 +346,7 @@ def update_prtg_server(
     password: str | None = None,
     enabled: bool | None = None,
 ) -> dict[str, Any]:
-    if os.getenv("PRTG_SERVERS_JSON"):
+    if servers_json_is_configured():
         raise ValueError("Para editar servidores desde la UI usa PRTG_SERVERS_FILE, no PRTG_SERVERS_JSON")
 
     servers = read_servers_file()
@@ -574,7 +396,7 @@ def update_prtg_server(
 
 
 def delete_prtg_server(server_id: str) -> dict[str, Any]:
-    if os.getenv("PRTG_SERVERS_JSON"):
+    if servers_json_is_configured():
         raise ValueError("Para borrar servidores desde la UI usa PRTG_SERVERS_FILE, no PRTG_SERVERS_JSON")
 
     servers = read_servers_file()
@@ -874,10 +696,10 @@ def init_db() -> None:
 
 
 def seed_default_users(app: Flask) -> None:
-    if not env_bool("SEED_DEFAULT_USERS", False):
+    if not APP_SETTINGS.seed_default_users:
         return
 
-    raw_users = os.getenv("DEFAULT_USERS_JSON", "[]")
+    raw_users = APP_SETTINGS.default_users_json
 
     try:
         users = json.loads(raw_users)
@@ -2228,18 +2050,20 @@ def create_app() -> Flask:
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
     app.config.update(
-        SECRET_KEY=get_env("APP_SECRET_KEY", os.getenv("SECRET_KEY", "dev-insecure-change-me")),
+        SECRET_KEY=APP_SETTINGS.secret_key,
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
-        SESSION_COOKIE_SECURE=env_bool("SESSION_COOKIE_SECURE", False),
-        PERMANENT_SESSION_LIFETIME=timedelta(hours=int(os.getenv("SESSION_HOURS", "8"))),
-        PRTG_VERIFY_SSL=env_bool("PRTG_VERIFY_SSL", False),
-        HISTORY_CACHE_TTL=int(os.getenv("HISTORY_CACHE_TTL", "60")),
-        REQUEST_TIMEOUT=int(os.getenv("REQUEST_TIMEOUT", "20")),
+        SESSION_COOKIE_SECURE=APP_SETTINGS.session_cookie_secure,
+        PERMANENT_SESSION_LIFETIME=timedelta(
+            hours=APP_SETTINGS.session_hours
+        ),
+        PRTG_VERIFY_SSL=SHARED_SETTINGS.verify_ssl,
+        HISTORY_CACHE_TTL=APP_SETTINGS.history_cache_ttl,
+        REQUEST_TIMEOUT=APP_SETTINGS.request_timeout,
     )
 
     logging.basicConfig(
-        level=os.getenv("LOG_LEVEL", "INFO"),
+        level=APP_SETTINGS.log_level,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
@@ -2898,7 +2722,7 @@ def create_app() -> Flask:
     @admin_required
     def api_admin_servers():
         if request.method == "GET":
-            if os.getenv("PRTG_SERVERS_JSON"):
+            if servers_json_is_configured():
                 servers = [safe_server(server) for server in app.prtg_servers.values()]  # type: ignore[attr-defined]
 
                 return jsonify(
@@ -3384,5 +3208,5 @@ if __name__ == "__main__":
     app.run(
         host="0.0.0.0",
         port=PORT,
-        debug=env_bool("FLASK_DEBUG", False),
+        debug=APP_SETTINGS.flask_debug,
     )

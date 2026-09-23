@@ -12,39 +12,41 @@ from typing import Any
 
 import requests
 import urllib3
+from config import (
+    BASE_DIR,
+    load_environment,
+    load_monitor_prtg_servers,
+    load_monitor_settings,
+)
 from requests.adapters import HTTPAdapter, Retry
 
-BASE_DIR = Path(__file__).resolve().parent
-
-try:
-    from dotenv import load_dotenv
-except ImportError:
-    load_dotenv = None
-
-if load_dotenv is not None:
-    load_dotenv(BASE_DIR / ".env")
+load_environment()
+MONITOR_SETTINGS = load_monitor_settings()
+SHARED_SETTINGS = MONITOR_SETTINGS.shared
 
 
 # -------------------- Config --------------------
-LOG_HISTORY_SIZE = int(os.getenv("LOG_HISTORY_SIZE", "50"))
-UPDATE_INTERVAL = int(os.getenv("UPDATE_INTERVAL", "30"))
-REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "10"))
-MAX_WORKERS = int(os.getenv("MAX_WORKERS", "6"))
+LOG_HISTORY_SIZE = MONITOR_SETTINGS.log_history_size
+UPDATE_INTERVAL = MONITOR_SETTINGS.update_interval
+REQUEST_TIMEOUT = MONITOR_SETTINGS.request_timeout
+MAX_WORKERS = MONITOR_SETTINGS.max_workers
 
-METRICS_WINDOW_MINUTES = int(os.getenv("METRICS_WINDOW_MINUTES", "120"))
-DEVICE_CACHE_TTL_SECONDS = int(os.getenv("DEVICE_CACHE_TTL_SECONDS", "600"))
-PREVIOUS_STATE_MAX_AGE_MINUTES = int(os.getenv("PREVIOUS_STATE_MAX_AGE_MINUTES", "1440"))
+METRICS_WINDOW_MINUTES = MONITOR_SETTINGS.metrics_window_minutes
+DEVICE_CACHE_TTL_SECONDS = MONITOR_SETTINGS.device_cache_ttl_seconds
+PREVIOUS_STATE_MAX_AGE_MINUTES = (
+    MONITOR_SETTINGS.previous_state_max_age_minutes
+)
 
-OUTPUT_PATH = Path(os.getenv("OUTPUT_PATH", BASE_DIR / "estado_sensores_prtg.json"))
-DB_PATH = Path(os.getenv("DB_PATH", BASE_DIR / "usuarios.db"))
-MF_SLA_HOURS = int(os.getenv("MF_SLA_HOURS", "6"))
-EVENT_RETENTION_DAYS = int(os.getenv("SENSOR_EVENT_RETENTION_DAYS", "90"))
-VERIFY_SSL = os.getenv("PRTG_VERIFY_SSL", "0").strip().lower() in {"1", "true", "yes", "on"}
+OUTPUT_PATH = SHARED_SETTINGS.output_path
+DB_PATH = SHARED_SETTINGS.db_path
+MF_SLA_HOURS = MONITOR_SETTINGS.mf_sla_hours
+EVENT_RETENTION_DAYS = SHARED_SETTINGS.event_retention_days
+VERIFY_SSL = SHARED_SETTINGS.verify_ssl
 
-HTTP_RETRIES = int(os.getenv("HTTP_RETRIES", "3"))
-HTTP_BACKOFF = float(os.getenv("HTTP_BACKOFF", "0.5"))
-HTTP_POOL_CONNECTIONS = int(os.getenv("HTTP_POOL_CONNECTIONS", "20"))
-HTTP_POOL_MAXSIZE = int(os.getenv("HTTP_POOL_MAXSIZE", "50"))
+HTTP_RETRIES = SHARED_SETTINGS.http.retries
+HTTP_BACKOFF = SHARED_SETTINGS.http.backoff
+HTTP_POOL_CONNECTIONS = SHARED_SETTINGS.http.pool_connections
+HTTP_POOL_MAXSIZE = SHARED_SETTINGS.http.pool_maxsize
 
 if not VERIFY_SSL:
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -67,14 +69,7 @@ PRTG_STATUS_MAP = {
 
 DOWN_STATES = {"Down", "Down Acknowledged", "Down Partial"}
 
-MF_ALERT_STATES = {
-    item.strip()
-    for item in os.getenv(
-        "MF_ALERT_STATES",
-        "Down,Down Acknowledged,Down Partial",
-    ).split(",")
-    if item.strip()
-}
+MF_ALERT_STATES = set(MONITOR_SETTINGS.mf_alert_states)
 
 
 def metrics_max_points() -> int:
@@ -89,79 +84,8 @@ def metrics_max_points() -> int:
     return max(10, int((METRICS_WINDOW_MINUTES * 60) / interval) + 10)
 
 
-def resolve_path(path_value: str | os.PathLike[str]) -> Path:
-    path = Path(path_value)
-    return path if path.is_absolute() else (BASE_DIR / path).resolve()
-
-
 def load_servers() -> list[dict[str, Any]]:
-    raw = (os.getenv("PRTG_SERVERS_JSON") or "").strip()
-
-    if not raw:
-        servers_file = os.getenv("PRTG_SERVERS_FILE", "servers.json")
-        path = resolve_path(servers_file)
-
-        if path.is_file():
-            raw = path.read_text(encoding="utf-8")
-
-    if not raw:
-        raise ValueError("Define PRTG_SERVERS_JSON o PRTG_SERVERS_FILE con credenciales.")
-
-    try:
-        servers = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Configuracion PRTG invalida: {exc}") from exc
-
-    if not isinstance(servers, list) or not servers:
-        raise ValueError("La configuracion de servidores PRTG debe ser una lista no vacia.")
-
-    clean: list[dict[str, Any]] = []
-
-    for index, server in enumerate(servers, start=1):
-        if not isinstance(server, dict):
-            print(f"[WARN] Servidor #{index} ignorado: no es objeto JSON")
-            continue
-        enabled_raw = server.get("enabled", True)
-        enabled = True
-
-        if isinstance(enabled_raw, bool):
-            enabled = enabled_raw
-        elif isinstance(enabled_raw, int):
-            enabled = enabled_raw == 1
-        elif isinstance(enabled_raw, str):
-            enabled = enabled_raw.strip().lower() not in {"0", "false", "no", "off", "disabled", "inactivo"}
-
-        if not enabled:
-            print(f"[INFO] Servidor #{index} desactivado, se omite del monitoreo")
-            continue
-
-        server_type = str(server.get("type", "prtg")).strip().lower()
-        if server_type != "prtg":
-            print(f"[INFO] Servidor #{index} tipo {server_type} ignorado por este collector")
-            continue
-
-        name = str(server.get("name", "")).strip()
-        url = str(server.get("url", "")).strip().rstrip("/")
-        username = str(server.get("username", "")).strip()
-        has_secret = bool(server.get("password") or server.get("passhash"))
-
-        if not (name and url and username and has_secret):
-            print(f"[WARN] Servidor #{index} ignorado por configuracion incompleta")
-            continue
-
-        clean.append(
-            {
-                **server,
-                "name": name,
-                "url": url,
-                "username": username,
-            }
-        )
-
-    if not clean:
-        raise ValueError("No hay servidores PRTG validos.")
-
-    return clean
+    return load_monitor_prtg_servers()
 
 
 def auth_params(server: dict[str, Any]) -> dict[str, Any]:
