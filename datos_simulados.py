@@ -8,6 +8,10 @@ Expone un subconjunto compatible de la API que usan app.py y monitor.py:
 - /<server>/api/pauseobjectfor.htm
 - /<server>/api/pause.htm
 
+Además expone superficies sintéticas opt-in para el futuro Metrics Engine:
+- /<server>/api/multichannel.json
+- /<server>/api/multichannel_history.json
+
 Todos los nombres, IPs y datos son sintéticos.
 """
 from __future__ import annotations
@@ -16,6 +20,7 @@ import argparse
 import csv
 import io
 import math
+import os
 import random
 import threading
 from dataclasses import dataclass, field
@@ -23,6 +28,20 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from flask import Flask, Response, abort, jsonify, request
+
+from simulator_multichannel import SyntheticMultichannelSimulator
+
+
+def _environment_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+DEFAULT_SIMULATOR_SEED = _environment_int("SIMULATOR_SEED", 20260923)
+DEFAULT_TICK_SECONDS = _environment_int("SIMULATOR_TICK_SECONDS", 300)
+DEFAULT_SCENARIO = os.getenv("SIMULATOR_SCENARIO", "normal") or "normal"
 
 STATUS_NAMES = {
     1: "Unknown",
@@ -109,7 +128,16 @@ class SimulatedPRTG:
 
 
 class Simulator:
-    def __init__(self, server_count: int, sensor_count: int, seed: int):
+    def __init__(
+        self,
+        server_count: int,
+        sensor_count: int,
+        seed: int,
+        *,
+        scenario: str = "normal",
+        tick_seconds: int = 300,
+        start_time: datetime | None = None,
+    ):
         self.server_count = max(1, server_count)
         self.sensor_count = max(self.server_count, sensor_count)
         self.seed = seed
@@ -117,6 +145,15 @@ class Simulator:
         self.lock = threading.RLock()
         self.servers: dict[str, SimulatedPRTG] = {}
         self._build()
+        # Se construye después del dataset legacy y usa un PRNG derivado propio.
+        # Por eso no consume ni altera la secuencia aleatoria legacy.
+        self.multichannel = SyntheticMultichannelSimulator(
+            self.servers,
+            seed=seed,
+            scenario=scenario,
+            tick_seconds=tick_seconds,
+            start_time=start_time,
+        )
 
     def _weighted_status(self) -> int:
         pick = self.random.random()
@@ -241,16 +278,64 @@ class Simulator:
                 sensor.status_raw = sensor.previous_status if sensor.previous_status not in {9, 12} else 3
                 sensor.message = "OK"
 
+    def tick(self, steps: int = 1) -> datetime:
+        return self.multichannel.tick(steps)
+
+    def set_scenario(self, scenario: str) -> None:
+        self.multichannel.set_scenario(scenario)
+
+    def multichannel_sensor(
+        self,
+        slug: str,
+        sensor_id: int,
+        *,
+        scenario: str | None = None,
+        fault: str | None = None,
+    ) -> dict[str, Any]:
+        self.server(slug)
+        return self.multichannel.sensor_source(
+            slug,
+            sensor_id,
+            scenario=scenario,
+            fault=fault,
+        )
+
+    def multichannel_history(
+        self,
+        slug: str,
+        sensor_id: int,
+        *,
+        points: int = 12,
+        scenario: str | None = None,
+        fault: str | None = None,
+    ) -> dict[str, Any]:
+        self.server(slug)
+        return self.multichannel.historic_source(
+            slug,
+            sensor_id,
+            points=points,
+            scenario=scenario,
+            fault=fault,
+        )
+
 
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument("--servers", type=int, default=13)
 parser.add_argument("--sensors", type=int, default=1000)
-parser.add_argument("--seed", type=int, default=20260923)
+parser.add_argument("--seed", type=int, default=DEFAULT_SIMULATOR_SEED)
+parser.add_argument("--scenario", default=DEFAULT_SCENARIO)
+parser.add_argument("--tick-seconds", type=int, default=DEFAULT_TICK_SECONDS)
 parser.add_argument("--host", default="127.0.0.1")
 parser.add_argument("--port", type=int, default=9090)
 _known_args, _unknown = parser.parse_known_args()
 
-sim = Simulator(_known_args.servers, _known_args.sensors, _known_args.seed)
+sim = Simulator(
+    _known_args.servers,
+    _known_args.sensors,
+    _known_args.seed,
+    scenario=_known_args.scenario,
+    tick_seconds=_known_args.tick_seconds,
+)
 app = Flask(__name__)
 
 
@@ -283,6 +368,61 @@ def table_json(slug: str):
             return jsonify({"sensors": [sensor.as_prtg() for sensor in server.sensors.values()]})
 
     return jsonify({content: []})
+
+
+@app.get("/<slug>/api/multichannel.json")
+def multichannel_json(slug: str):
+    sensor_id = request.args.get("id", type=int)
+    scenario = request.args.get("scenario")
+    fault = request.args.get("fault")
+    advance = request.args.get("advance", default=0, type=int)
+
+    try:
+        with sim.lock:
+            sim.server(slug)
+            if advance > 0:
+                sim.tick(advance)
+            if sensor_id is not None:
+                payload = sim.multichannel_sensor(
+                    slug,
+                    sensor_id,
+                    scenario=scenario,
+                    fault=fault,
+                )
+            else:
+                payload = sim.multichannel.server_source(
+                    slug,
+                    scenario=scenario,
+                    fault=fault,
+                )
+    except KeyError:
+        abort(404)
+    except ValueError as exc:
+        abort(400, description=str(exc))
+    return jsonify(payload)
+
+
+@app.get("/<slug>/api/multichannel_history.json")
+def multichannel_history_json(slug: str):
+    sensor_id = request.args.get("id", type=int)
+    points = request.args.get("points", default=12, type=int)
+    if sensor_id is None:
+        abort(400)
+
+    try:
+        with sim.lock:
+            payload = sim.multichannel_history(
+                slug,
+                sensor_id,
+                points=points,
+                scenario=request.args.get("scenario"),
+                fault=request.args.get("fault"),
+            )
+    except KeyError:
+        abort(404)
+    except ValueError as exc:
+        abort(400, description=str(exc))
+    return jsonify(payload)
 
 
 @app.get("/<slug>/api/pauseobjectfor.htm")
@@ -359,14 +499,22 @@ def main() -> None:
     args = argparse.ArgumentParser(description="Simulador PRTG local para CoreView Cloud Lab")
     args.add_argument("--servers", type=int, default=13, help="Cantidad de PRTG sintéticos")
     args.add_argument("--sensors", type=int, default=1000, help="Cantidad total de sensores")
-    args.add_argument("--seed", type=int, default=20260923, help="Semilla reproducible")
+    args.add_argument("--seed", type=int, default=DEFAULT_SIMULATOR_SEED, help="Semilla reproducible")
+    args.add_argument("--scenario", default=DEFAULT_SCENARIO, help="Escenario multicanal")
+    args.add_argument("--tick-seconds", type=int, default=DEFAULT_TICK_SECONDS, help="Segundos por tick lógico")
     args.add_argument("--host", default="127.0.0.1")
     args.add_argument("--port", type=int, default=9090)
     parsed = args.parse_args()
 
     # Si los argumentos difieren de los usados al importar, reconstruimos el dataset.
     global sim
-    sim = Simulator(parsed.servers, parsed.sensors, parsed.seed)
+    sim = Simulator(
+        parsed.servers,
+        parsed.sensors,
+        parsed.seed,
+        scenario=parsed.scenario,
+        tick_seconds=parsed.tick_seconds,
+    )
 
     print(f"Synthetic PRTG simulator: http://{parsed.host}:{parsed.port}")
     print(f"Servers: {len(sim.servers)} | Sensors: {sum(len(s.sensors) for s in sim.servers.values())}")

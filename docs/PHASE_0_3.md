@@ -108,13 +108,43 @@ SQLite, APIs, and frontend remain on the legacy path. `Coverage` is not inferred
 as availability, and accumulated traffic counters are reported but not converted
 to rates.
 
+## Phase 0.3C: Synthetic multichannel PRTG simulator
+
+Implemented scope:
+
+- two additive opt-in source routes, `multichannel.json` and
+  `multichannel_history.json`;
+- deterministic family assignment for Ping, CPU, memory, traffic, and SFP while
+  retaining the existing 1,000 legacy sensors;
+- per-sensor profiles derived from `SIMULATOR_SEED` without consuming the legacy
+  random sequence;
+- aware UTC logical clock with explicit, sleep-free ticks;
+- continuous family-specific value evolution and ordered historical series;
+- PRTG-like channel labels and formatted source units rather than canonical
+  metric keys;
+- deterministic full and partial SFP channel sets;
+- explicit normal, trend, partial, unknown-channel, and invalid-source
+  scenarios;
+- simulator-to-`PRTGMetricAdapter` integration tests without production
+  consumer integration.
+
+The legacy devices/sensors tables, Ping CSV, healthcheck, pause/resume,
+collector snapshot, SQLite, APIs, and frontend remain unchanged. Logical ticks
+only affect the new opt-in surfaces.
+
+```text
+legacy simulator routes ----------------> current collector/history/UI
+
+synthetic profiles + logical tick
+               |
+     multichannel JSON/history
+               |
+     PRTGMetricAdapter (tests only)
+               |
+          MetricSample[]
+```
+
 ## Remaining planned incremental phases
-
-### 0.3C - Synthetic simulator multichannel
-
-Extend the PRTG-compatible simulator only after the adapter contract is stable.
-Expose deterministic synthetic source channels for Ping, CPU, memory, traffic,
-and SFP while retaining all legacy simulator endpoints and responses.
 
 ### 0.3D - HistoryService integration
 
@@ -134,16 +164,17 @@ Add multichannel visualization only after backend contracts are stable. Select
 channels and axes by metadata rather than sensor-name conditions, and retain the
 current dashboard until equivalent behavior is verified.
 
-## Entry criteria for Phase 0.3C
+## Entry criteria for Phase 0.3D
 
-- Phase 0.3A and 0.3B tests remain green with the complete regression suite.
-- The simulator extension is additive and preserves every legacy endpoint and
-  response field.
-- Synthetic channel payloads follow the tested adapter fixtures and use stable
-  server/sensor IDs.
-- Legacy 13-server / 1,000-sensor collection remains a required parity check.
-- The adapter is not connected to `monitor.py` or `HistoryService` during the
-  simulator-only increment.
+- Phase 0.3A through 0.3C remain green with the complete regression suite.
+- Normalized history is introduced behind `HistoryService`, not inside
+  `PRTGClient` or Flask routes.
+- The existing Ping datasets remain available through an explicit compatibility
+  path until parity is proven.
+- New history tests use the multichannel simulator and adapter without changing
+  the legacy Ping CSV contract.
+- Stable sensor identity and timezone behavior are preserved across source,
+  normalization, caching, and compatibility output.
 
 ## Migration principles
 
