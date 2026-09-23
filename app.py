@@ -246,7 +246,7 @@ def normalize_prtg_url(raw_url: str) -> str:
     parsed = urlparse(url)
 
     if not parsed.scheme or not parsed.netloc:
-        raise ValueError("Servidor/puerto invalido. Usa algo como 10.0.0.5:5055")
+        raise ValueError("Servidor/puerto invalido. Usa algo como 192.0.2.5:5055")
 
     if parsed.scheme not in {"http", "https"}:
         raise ValueError("Solo se permite http o https")
