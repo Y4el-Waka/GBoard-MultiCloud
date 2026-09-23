@@ -73,14 +73,42 @@ Explicitly unchanged in 0.3A:
 - `datos_simulados.py`;
 - templates, static assets, and charts.
 
-## Planned incremental phases
+## Phase 0.3B: PRTG metrics adapter
 
-### 0.3B - PRTG channel adapter
+Implemented scope:
 
-Build a provider adapter above `PRTGClient` that maps representative PRTG
-channel payloads to canonical definitions and samples. Establish explicit unit
-conversion, source traceability, missing-channel, invalid-value, and unknown-
-channel behavior. Keep the current collector output unchanged.
+- additive `PRTGMetricAdapter` above the Phase 0.3A domain;
+- centralized PRTG source-channel aliases and source-to-canonical mappings;
+- explicit normalization for latency, percentages, byte volumes, traffic
+  rates, optical power, temperature, voltage, and bias current;
+- independent inputs for PRTG-shaped sensor records and current historic CSV;
+- explicit source timezone requirement for naive timestamps and UTC output;
+- stable identity from configured `server_id` plus PRTG `objid`;
+- tolerant per-channel results with normalized samples, unknown channels, and
+  typed issues;
+- partial-channel support and selected source traceability metadata;
+- deterministic synthetic PRTG fixtures for Ping, CPU, memory, traffic, and
+  SFP;
+- no production consumer integration.
+
+The resulting boundary is:
+
+```text
+PRTG table record / channel observations / historic CSV
+                         |
+                 PRTGMetricAdapter
+                         |
+       AdapterResult(samples, unknown_channels, issues)
+                         |
+                  MetricSample[]
+```
+
+`PRTGClient`, the current simulator, collector, `HistoryService`, snapshot,
+SQLite, APIs, and frontend remain on the legacy path. `Coverage` is not inferred
+as availability, and accumulated traffic counters are reported but not converted
+to rates.
+
+## Remaining planned incremental phases
 
 ### 0.3C - Synthetic simulator multichannel
 
@@ -106,15 +134,16 @@ Add multichannel visualization only after backend contracts are stable. Select
 channels and axes by metadata rather than sensor-name conditions, and retain the
 current dashboard until equivalent behavior is verified.
 
-## Entry criteria for Phase 0.3B
+## Entry criteria for Phase 0.3C
 
-- Phase 0.3A model and fixtures remain green with the complete regression suite.
-- No production module imports `metrics` yet.
-- Canonical key and unit mappings are reviewed before provider code is written.
-- Representative source payload fixtures are synthetic and contain no company
-  or production infrastructure data.
-- Unknown and partially available channels are treated as normal adapter cases,
-  not model errors.
+- Phase 0.3A and 0.3B tests remain green with the complete regression suite.
+- The simulator extension is additive and preserves every legacy endpoint and
+  response field.
+- Synthetic channel payloads follow the tested adapter fixtures and use stable
+  server/sensor IDs.
+- Legacy 13-server / 1,000-sensor collection remains a required parity check.
+- The adapter is not connected to `monitor.py` or `HistoryService` during the
+  simulator-only increment.
 
 ## Migration principles
 

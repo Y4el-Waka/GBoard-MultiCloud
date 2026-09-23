@@ -1,0 +1,21 @@
+{
+  "server_id": "srv_synthetic_02",
+  "source_timezone": "+00:00",
+  "sensor": {
+    "sensor_type": "sfp",
+    "objid": 200001,
+    "parentid": 20001,
+    "device": "SITE-02-001",
+    "sensor": "SFP Optics",
+    "group_name": "PRTG LAB 02",
+    "status": "Up",
+    "status_raw": 3,
+    "lastvalue": "-5.0 dBm",
+    "message": "Synthetic monitoring data",
+    "channels": [
+      {"channel": "RX Power", "value": "-5.0 dBm", "timestamp": "2026-09-23 12:00:00"},
+      {"channel": "TX Power", "value": "-2.5 dBm", "timestamp": "2026-09-23 12:00:00"},
+      {"channel": "Vendor Diagnostic", "value": "7 widgets", "timestamp": "2026-09-23 12:00:00"}
+    ]
+  }
+}

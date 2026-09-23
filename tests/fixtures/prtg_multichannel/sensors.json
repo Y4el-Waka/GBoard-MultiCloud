@@ -1,0 +1,109 @@
+{
+  "fixture_version": "0.3b",
+  "server_id": "srv_synthetic_01",
+  "source_timezone": "-06:00",
+  "sensors": [
+    {
+      "sensor_type": "ping",
+      "objid": 100001,
+      "parentid": 10001,
+      "device": "SITE-01-001",
+      "sensor": "Ping",
+      "group_name": "PRTG LAB 01",
+      "status": "Up",
+      "status_raw": 3,
+      "lastvalue": "14.5 ms",
+      "message": "Synthetic monitoring data",
+      "channels": [
+        {"channel": "Ping Time", "value": "14.5 ms", "timestamp": "2026-09-23 12:00:00"},
+        {"channel": "Packet Loss", "value": "0.5 %", "timestamp": "2026-09-23 12:00:00"},
+        {"channel": "Availability", "value": "99.9 %", "timestamp": "2026-09-23 12:00:00"},
+        {"channel": "Latency", "value": "17.2 ms", "timestamp": "2026-09-23 12:05:00"},
+        {"channel": "PacketLoss", "value": "1.0 %", "timestamp": "2026-09-23 12:05:00"},
+        {"channel": "Availability", "value": "99.5 %", "timestamp": "2026-09-23 12:05:00"}
+      ]
+    },
+    {
+      "sensor_type": "cpu",
+      "objid": 100002,
+      "parentid": 10001,
+      "device": "SITE-01-001",
+      "sensor": "CPU Load",
+      "group_name": "PRTG LAB 01",
+      "status": "Up",
+      "status_raw": 3,
+      "lastvalue": "48 %",
+      "message": "Synthetic monitoring data",
+      "channels": [
+        {"channel": "CPU Load", "value": "35 %", "timestamp": "2026-09-23 12:00:00"},
+        {"channel": "CPU Usage", "value": "48 %", "timestamp": "2026-09-23 12:05:00"},
+        {"channel": "CPU Load", "value": "67 %", "timestamp": "2026-09-23 12:10:00"}
+      ]
+    },
+    {
+      "sensor_type": "memory",
+      "objid": 100003,
+      "parentid": 10001,
+      "device": "SITE-01-001",
+      "sensor": "Memory",
+      "group_name": "PRTG LAB 01",
+      "status": "Up",
+      "status_raw": 3,
+      "lastvalue": "62 %",
+      "message": "Synthetic monitoring data",
+      "channels": [
+        {"channel": "Memory Usage", "value": "58 %", "timestamp": "2026-09-23 12:00:00"},
+        {"channel": "Used Memory", "value": "6144 MByte", "timestamp": "2026-09-23 12:00:00"},
+        {"channel": "Memory", "value": "62 %", "timestamp": "2026-09-23 12:05:00"},
+        {"channel": "Memory Used", "value": "6500 MByte", "timestamp": "2026-09-23 12:05:00"}
+      ]
+    },
+    {
+      "sensor_type": "traffic",
+      "objid": 100004,
+      "parentid": 10002,
+      "device": "SITE-01-002",
+      "sensor": "Traffic",
+      "group_name": "PRTG LAB 01",
+      "status": "Up",
+      "status_raw": 3,
+      "lastvalue": "85 Mbit/s",
+      "message": "Synthetic monitoring data",
+      "channels": [
+        {"channel": "Traffic In", "value": "850 Kbit/s", "kind": "rate", "timestamp": "2026-09-23 12:00:00"},
+        {"channel": "Traffic Out", "value": "450000 bit/s", "kind": "rate", "timestamp": "2026-09-23 12:00:00"},
+        {"channel": "Utilization", "value": "12 %", "timestamp": "2026-09-23 12:00:00"},
+        {"channel": "Traffic In", "value": "85 Mbit/s", "kind": "rate", "timestamp": "2026-09-23 12:05:00"},
+        {"channel": "Bandwidth Out", "value": "42 Mbit/s", "kind": "rate", "timestamp": "2026-09-23 12:05:00"},
+        {"channel": "Link Utilization", "value": "31 %", "timestamp": "2026-09-23 12:05:00"},
+        {"channel": "Traffic In", "value": "0.12 Gbit/s", "kind": "rate", "timestamp": "2026-09-23 12:10:00"},
+        {"channel": "Traffic Out", "value": "65000 Kbit/s", "kind": "rate", "timestamp": "2026-09-23 12:10:00"},
+        {"channel": "Utilization", "value": "45 %", "timestamp": "2026-09-23 12:10:00"}
+      ]
+    },
+    {
+      "sensor_type": "sfp",
+      "objid": 100005,
+      "parentid": 10002,
+      "device": "SITE-01-002",
+      "sensor": "SFP Optics",
+      "group_name": "PRTG LAB 01",
+      "status": "Up",
+      "status_raw": 3,
+      "lastvalue": "-4.2 dBm",
+      "message": "Synthetic monitoring data",
+      "channels": [
+        {"channel": "RX Power", "value": "-4.2 dBm", "timestamp": "2026-09-23 12:00:00"},
+        {"channel": "TX Power", "value": "-2.1 dBm", "timestamp": "2026-09-23 12:00:00"},
+        {"channel": "Temperature", "value": "37.4 °C", "timestamp": "2026-09-23 12:00:00"},
+        {"channel": "Voltage", "value": "3.31 V", "timestamp": "2026-09-23 12:00:00"},
+        {"channel": "Bias Current", "value": "6.8 mA", "timestamp": "2026-09-23 12:00:00"},
+        {"channel": "Receive Power", "value": "-4.1 dBm", "timestamp": "2026-09-23 12:05:00"},
+        {"channel": "Transmit Power", "value": "-2.0 dBm", "timestamp": "2026-09-23 12:05:00"},
+        {"channel": "SFP Temperature", "value": "37.7 °C", "timestamp": "2026-09-23 12:05:00"},
+        {"channel": "Supply Voltage", "value": "3.30 V", "timestamp": "2026-09-23 12:05:00"},
+        {"channel": "TX Bias Current", "value": "6.9 mA", "timestamp": "2026-09-23 12:05:00"}
+      ]
+    }
+  ]
+}
