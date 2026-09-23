@@ -1,0 +1,155 @@
+{
+  "schema_version": "0.3a",
+  "interval_seconds": 300,
+  "timestamps": [
+    "2026-09-23T12:00:00Z",
+    "2026-09-23T12:05:00Z",
+    "2026-09-23T12:10:00Z",
+    "2026-09-23T12:15:00Z",
+    "2026-09-23T12:20:00Z",
+    "2026-09-23T12:25:00Z",
+    "2026-09-23T12:30:00Z"
+  ],
+  "sensors": [
+    {
+      "sensor_type": "ping",
+      "identity": {
+        "server_id": "srv_synthetic_01",
+        "sensor_id": "sensor_ping_001",
+        "device_id": "device_synthetic_001"
+      },
+      "metadata": {
+        "group_name": "PRTG LAB 01",
+        "device_label": "SITE-01-001"
+      },
+      "channels": {
+        "latency_ms": {
+          "unit": "ms",
+          "source_channel": "synthetic_latency",
+          "values": [18.2, 19.1, 21.4, 25.8, 20.6, 17.9, 18.7]
+        },
+        "packet_loss_pct": {
+          "unit": "%",
+          "source_channel": "synthetic_packet_loss",
+          "values": [0.0, 0.0, 0.5, 2.0, 0.2, 0.0, 0.0]
+        },
+        "availability_pct": {
+          "unit": "%",
+          "source_channel": "synthetic_availability",
+          "values": [100.0, 100.0, 99.5, 98.0, 99.8, 100.0, 100.0]
+        }
+      }
+    },
+    {
+      "sensor_type": "cpu",
+      "identity": {
+        "server_id": "srv_synthetic_01",
+        "sensor_id": "sensor_cpu_001",
+        "device_id": "device_synthetic_001"
+      },
+      "metadata": {
+        "group_name": "PRTG LAB 01",
+        "device_label": "SITE-01-001"
+      },
+      "channels": {
+        "cpu_usage_pct": {
+          "unit": "%",
+          "source_channel": "synthetic_cpu_usage",
+          "values": [30, 35, 48, 67, 83, 62, 41]
+        }
+      }
+    },
+    {
+      "sensor_type": "memory",
+      "identity": {
+        "server_id": "srv_synthetic_01",
+        "sensor_id": "sensor_memory_001",
+        "device_id": "device_synthetic_001"
+      },
+      "metadata": {
+        "group_name": "PRTG LAB 01",
+        "device_label": "SITE-01-001"
+      },
+      "channels": {
+        "memory_usage_pct": {
+          "unit": "%",
+          "source_channel": "synthetic_memory_usage",
+          "values": [54.0, 55.5, 57.0, 60.0, 63.5, 61.0, 58.0]
+        },
+        "memory_used_bytes": {
+          "unit": "bytes",
+          "source_channel": "synthetic_memory_used",
+          "values": [8589934592, 8858370048, 9126805504, 9663676416, 10200547328, 9824731136, 9341553869]
+        }
+      }
+    },
+    {
+      "sensor_type": "traffic",
+      "identity": {
+        "server_id": "srv_synthetic_01",
+        "sensor_id": "sensor_traffic_001",
+        "device_id": "device_synthetic_002"
+      },
+      "metadata": {
+        "group_name": "PRTG LAB 01",
+        "device_label": "SITE-01-002"
+      },
+      "channels": {
+        "traffic_in_bps": {
+          "unit": "bps",
+          "source_channel": "synthetic_traffic_in",
+          "values": [42000000, 55000000, 78000000, 85000000, 63000000, 49000000, 37000000]
+        },
+        "traffic_out_bps": {
+          "unit": "bps",
+          "source_channel": "synthetic_traffic_out",
+          "values": [18000000, 22000000, 35000000, 44000000, 39000000, 27000000, 20000000]
+        },
+        "utilization_pct": {
+          "unit": "%",
+          "source_channel": "synthetic_link_utilization",
+          "values": [42.0, 55.0, 78.0, 85.0, 63.0, 49.0, 37.0]
+        }
+      }
+    },
+    {
+      "sensor_type": "sfp",
+      "identity": {
+        "server_id": "srv_synthetic_01",
+        "sensor_id": "sensor_sfp_001",
+        "device_id": "device_synthetic_002"
+      },
+      "metadata": {
+        "group_name": "PRTG LAB 01",
+        "device_label": "SITE-01-002"
+      },
+      "channels": {
+        "rx_power_dbm": {
+          "unit": "dBm",
+          "source_channel": "synthetic_rx_power",
+          "values": [-4.2, -4.18, -4.21, -4.25, -4.22, -4.19, -4.17]
+        },
+        "tx_power_dbm": {
+          "unit": "dBm",
+          "source_channel": "synthetic_tx_power",
+          "values": [-2.1, -2.08, -2.09, -2.12, -2.11, -2.07, -2.06]
+        },
+        "temperature_c": {
+          "unit": "°C",
+          "source_channel": "synthetic_temperature",
+          "values": [36.2, 36.4, 36.8, 37.1, 36.9, 36.6, 36.3]
+        },
+        "voltage_v": {
+          "unit": "V",
+          "source_channel": "synthetic_voltage",
+          "values": [3.301, 3.302, 3.304, 3.303, 3.305, 3.304, 3.302]
+        },
+        "bias_current_ma": {
+          "unit": "mA",
+          "source_channel": "synthetic_bias_current",
+          "values": [6.12, 6.14, 6.17, 6.2, 6.18, 6.15, 6.13]
+        }
+      }
+    }
+  ]
+}
