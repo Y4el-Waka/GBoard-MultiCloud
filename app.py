@@ -16,7 +16,6 @@ from typing import Any
 from urllib.parse import urlparse
 
 import click
-import requests
 from config import (
     BASE_DIR,
     load_app_prtg_servers,
@@ -39,7 +38,7 @@ from flask import (
     session,
     url_for,
 )
-from requests.adapters import HTTPAdapter, Retry
+from prtg_client import PRTGClient, PRTGClientError
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
@@ -67,26 +66,13 @@ EXPORT_LOG_WINDOWS = {12, 24, 72}
 
 
 
-def create_http_session() -> requests.Session:
-    session_http = requests.Session()
-
-    retries = Retry(
-        total=SHARED_SETTINGS.http.retries,
-        backoff_factor=SHARED_SETTINGS.http.backoff,
-        status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=["GET"],
+def new_prtg_client(app: Flask) -> PRTGClient:
+    return PRTGClient(
+        timeout=app.config["REQUEST_TIMEOUT"],
+        verify_ssl=app.config["PRTG_VERIFY_SSL"],
+        http_settings=SHARED_SETTINGS.http,
+        logger=app.logger,
     )
-
-    adapter = HTTPAdapter(
-        max_retries=retries,
-        pool_connections=SHARED_SETTINGS.http.pool_connections,
-        pool_maxsize=SHARED_SETTINGS.http.pool_maxsize,
-    )
-
-    session_http.mount("http://", adapter)
-    session_http.mount("https://", adapter)
-
-    return session_http
 
 
 # -------------------- Roles --------------------
@@ -207,19 +193,6 @@ def find_server_index_by_id(servers: list[dict[str, Any]], server_id: str) -> in
 
     return None
 
-def prtg_auth_payload(server: dict[str, Any]) -> dict[str, Any]:
-    payload = {
-        "username": server["username"],
-    }
-
-    if server.get("passhash"):
-        payload["passhash"] = server["passhash"]
-    else:
-        payload["password"] = server["password"]
-
-    return payload
-
-
 def get_prtg_server_or_reload(app: Flask, group: str) -> dict[str, Any] | None:
     server = app.prtg_servers.get(group)  # type: ignore[attr-defined]
 
@@ -247,21 +220,13 @@ def prtg_pause_sensor(
         min(int(duration_minutes), 365 * 24 * 60),
     )
 
-    params = {
-        **prtg_auth_payload(server),
-        "id": sensor_id,
-        "duration": duration_minutes,
-        "pausemsg": pause_message or "Pausado desde dashboard",
-    }
-
-    response = app.http.get(  # type: ignore[attr-defined]
-        f"{server['url']}/api/pauseobjectfor.htm",
-        params=params,
-        timeout=app.config["REQUEST_TIMEOUT"],
-        verify=app.config["PRTG_VERIFY_SSL"],
-    )
-
-    response.raise_for_status()
+    with new_prtg_client(app) as client:
+        client.pause_for(
+            server,
+            sensor_id,
+            duration_minutes,
+            pause_message or "Pausado desde dashboard",
+        )
 
 
 def prtg_pause_sensor_indefinitely(
@@ -275,21 +240,12 @@ def prtg_pause_sensor_indefinitely(
     if not server:
         raise LookupError(f"Grupo '{group}' no encontrado")
 
-    params = {
-        **prtg_auth_payload(server),
-        "id": sensor_id,
-        "action": 0,
-        "pausemsg": pause_message or "Pausado indefinidamente desde dashboard",
-    }
-
-    response = app.http.get(  # type: ignore[attr-defined]
-        f"{server['url']}/api/pause.htm",
-        params=params,
-        timeout=app.config["REQUEST_TIMEOUT"],
-        verify=app.config["PRTG_VERIFY_SSL"],
-    )
-
-    response.raise_for_status()
+    with new_prtg_client(app) as client:
+        client.pause_indefinitely(
+            server,
+            sensor_id,
+            pause_message or "Pausado indefinidamente desde dashboard",
+        )
 
 def parse_pause_until_minutes(value: str) -> tuple[int, str]:
     raw = str(value or "").strip()
@@ -323,20 +279,8 @@ def prtg_resume_sensor(
     if not server:
         raise LookupError(f"Grupo '{group}' no encontrado")
 
-    params = {
-        **prtg_auth_payload(server),
-        "id": sensor_id,
-        "action": 1,
-    }
-
-    response = app.http.get(  # type: ignore[attr-defined]
-        f"{server['url']}/api/pause.htm",
-        params=params,
-        timeout=app.config["REQUEST_TIMEOUT"],
-        verify=app.config["PRTG_VERIFY_SSL"],
-    )
-
-    response.raise_for_status()
+    with new_prtg_client(app) as client:
+        client.resume(server, sensor_id)
 
 def update_prtg_server(
     server_id: str,
@@ -2071,7 +2015,6 @@ def create_app() -> Flask:
     seed_default_users(app)
 
     app.prtg_servers = load_prtg_servers(app)  # type: ignore[attr-defined]
-    app.http = create_http_session()  # type: ignore[attr-defined]
 
     @app.cli.command("audit-list")
     @click.option("--limit", default=20, show_default=True)
@@ -2479,33 +2422,17 @@ def create_app() -> Flask:
         end = datetime.now()
         start = end - timedelta(minutes=minutes)
 
-        params = {
-            "id": sensor_id,
-            "sdate": start.strftime("%Y-%m-%d-%H-%M-%S"),
-            "edate": end.strftime("%Y-%m-%d-%H-%M-%S"),
-            "avg": avg,
-            "username": server["username"],
-            "usecaption": 1,
-        }
-
-        if server.get("passhash"):
-            params["passhash"] = server["passhash"]
-        else:
-            params["password"] = server["password"]
-
-        url = f"{server['url']}/api/historicdata.csv"
-
         try:
-            response = app.http.get(  # type: ignore[attr-defined]
-                url,
-                params=params,
-                timeout=app.config["REQUEST_TIMEOUT"],
-                verify=app.config["PRTG_VERIFY_SSL"],
-            )
+            with new_prtg_client(app) as client:
+                historical_csv = client.get_historic_csv(
+                    server,
+                    sensor_id,
+                    start,
+                    end,
+                    average_seconds=avg,
+                )
 
-            response.raise_for_status()
-
-            payload = parse_history_csv(response.text)
+            payload = parse_history_csv(historical_csv)
 
             if not payload.get("series"):
                 app.logger.warning(
@@ -2513,16 +2440,16 @@ def create_app() -> Flask:
                     group,
                     sensor_id,
                     avg,
-                    response.status_code,
+                    200,
                     payload.get("error"),
-                    response.text[:300],
+                    historical_csv[:300],
                 )
 
             cache_set(key, payload, ttl_sec=app.config["HISTORY_CACHE_TTL"])
 
             return jsonify(payload)
 
-        except requests.RequestException as exc:
+        except PRTGClientError as exc:
             app.logger.warning(
                 "Error consultando historico PRTG %s/%s: %s",
                 group,
@@ -2633,7 +2560,7 @@ def create_app() -> Flask:
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
 
-        except requests.RequestException as exc:
+        except PRTGClientError as exc:
             app.logger.warning("Error pausando sensor PRTG %s/%s: %s", group, sensor_id, exc)
             return jsonify({"error": "No se pudo pausar el sensor en PRTG"}), 502
 
@@ -2686,7 +2613,7 @@ def create_app() -> Flask:
         except LookupError as exc:
             return jsonify({"error": str(exc)}), 404
 
-        except requests.RequestException as exc:
+        except PRTGClientError as exc:
             app.logger.warning("Error reanudando sensor PRTG %s/%s: %s", group, sensor_id, exc)
             return jsonify({"error": "No se pudo reanudar el sensor en PRTG"}), 502
 

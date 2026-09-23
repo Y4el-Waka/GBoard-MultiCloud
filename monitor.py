@@ -10,15 +10,13 @@ from datetime import UTC,datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-import requests
-import urllib3
 from config import (
     BASE_DIR,
     load_environment,
     load_monitor_prtg_servers,
     load_monitor_settings,
 )
-from requests.adapters import HTTPAdapter, Retry
+from prtg_client import PRTGClient, PRTGClientError
 
 load_environment()
 MONITOR_SETTINGS = load_monitor_settings()
@@ -42,15 +40,6 @@ DB_PATH = SHARED_SETTINGS.db_path
 MF_SLA_HOURS = MONITOR_SETTINGS.mf_sla_hours
 EVENT_RETENTION_DAYS = SHARED_SETTINGS.event_retention_days
 VERIFY_SSL = SHARED_SETTINGS.verify_ssl
-
-HTTP_RETRIES = SHARED_SETTINGS.http.retries
-HTTP_BACKOFF = SHARED_SETTINGS.http.backoff
-HTTP_POOL_CONNECTIONS = SHARED_SETTINGS.http.pool_connections
-HTTP_POOL_MAXSIZE = SHARED_SETTINGS.http.pool_maxsize
-
-if not VERIFY_SSL:
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
 
 PRTG_STATUS_MAP = {
     0: "None",
@@ -86,39 +75,6 @@ def metrics_max_points() -> int:
 
 def load_servers() -> list[dict[str, Any]]:
     return load_monitor_prtg_servers()
-
-
-def auth_params(server: dict[str, Any]) -> dict[str, Any]:
-    params = {"username": server["username"]}
-
-    if server.get("passhash"):
-        params["passhash"] = server["passhash"]
-    else:
-        params["password"] = server["password"]
-
-    return params
-
-
-def session_factory() -> requests.Session:
-    session = requests.Session()
-
-    retries = Retry(
-        total=HTTP_RETRIES,
-        backoff_factor=HTTP_BACKOFF,
-        status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=["GET"],
-    )
-
-    adapter = HTTPAdapter(
-        max_retries=retries,
-        pool_connections=HTTP_POOL_CONNECTIONS,
-        pool_maxsize=HTTP_POOL_MAXSIZE,
-    )
-
-    session.mount("http://", adapter)
-    session.mount("https://", adapter)
-
-    return session
 
 
 def conn_db() -> sqlite3.Connection:
@@ -252,7 +208,6 @@ class PRTGMonitor:
 
         self.device_ip_cache: dict[str, tuple[datetime, dict[str, str]]] = {}
 
-        self.http = session_factory()
         self.last_good_servers = servers
 
         self._load_recent_status_history()
@@ -388,23 +343,11 @@ class PRTGMonitor:
             print(f"[WARN] No se pudo recargar servidores. Uso ultima config valida. Error: {exc}")
             self.servers = self.last_good_servers
 
-    def _get_json(self, url: str, params: dict[str, Any]) -> dict[str, Any]:
-        response = self.http.get(
-            url,
-            params=params,
-            timeout=REQUEST_TIMEOUT,
-            verify=VERIFY_SSL,
-        )
-
-        response.raise_for_status()
-        payload = response.json()
-
-        if not isinstance(payload, dict):
-            raise ValueError("Respuesta PRTG no es JSON objeto")
-
-        return payload
-
-    def _get_device_ip_map(self, server: dict[str, Any], base_params: dict[str, Any]) -> dict[str, str]:
+    def _get_device_ip_map(
+        self,
+        server: dict[str, Any],
+        client: PRTGClient,
+    ) -> dict[str, str]:
         """
         Cachea mapa device_id -> IP/host.
 
@@ -423,14 +366,7 @@ class PRTGMonitor:
                 return device_map
 
         try:
-            devices_payload = self._get_json(
-                f"{server['url']}/api/table.json",
-                {
-                    **base_params,
-                    "content": "devices",
-                    "columns": "objid,host",
-                },
-            )
+            devices_payload = client.get_devices(server)
 
             device_ip = {
                 str(device["objid"]): device.get("host", "N/A")
@@ -454,22 +390,17 @@ class PRTGMonitor:
 
     def _fetch_server(self, server: dict[str, Any]) -> tuple[str, dict[str, Any], dict[str, str]]:
         try:
-            base_params = auth_params(server)
-
-            device_ip = self._get_device_ip_map(server, base_params)
-
-            sensors_payload = self._get_json(
-                f"{server['url']}/api/table.json",
-                {
-                    **base_params,
-                    "content": "sensors",
-                    "columns": "device,sensor,status,status_raw,lastvalue,message,parentid,objid",
-                },
-            )
+            with PRTGClient(
+                timeout=REQUEST_TIMEOUT,
+                verify_ssl=VERIFY_SSL,
+                http_settings=SHARED_SETTINGS.http,
+            ) as client:
+                device_ip = self._get_device_ip_map(server, client)
+                sensors_payload = client.get_sensors(server)
 
             return server["name"], sensors_payload, device_ip
 
-        except requests.RequestException as exc:
+        except PRTGClientError as exc:
             return server["name"], {"error": f"Conn error: {exc}"}, {}
 
         except Exception as exc:

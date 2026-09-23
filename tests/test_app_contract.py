@@ -188,16 +188,11 @@ class ApplicationContractTests(unittest.TestCase):
             "2026-09-23 11:55:00;10.00 ms;8.00 ms;12.00 ms;0.00 %;0.00 %;100.00 %\n"
             "2026-09-23 12:00:00;11.00 ms;9.00 ms;13.00 ms;1.00 %;0.00 %;100.00 %\n"
         )
-        upstream_response = mock.Mock()
-        upstream_response.status_code = 200
-        upstream_response.text = historical_csv
-        upstream_response.raise_for_status.return_value = None
-
         with mock.patch.object(
-            self.flask_app.http,
-            "get",
-            return_value=upstream_response,
-        ) as get:
+            self.app_module.PRTGClient,
+            "get_historic_csv",
+            return_value=historical_csv,
+        ) as get_historic_csv:
             response = self.client.get(
                 "/api/history",
                 query_string={
@@ -224,23 +219,27 @@ class ApplicationContractTests(unittest.TestCase):
         self.assertEqual(payload["unit"], "ms")
         self.assertEqual(payload["count"], 2)
 
-        called_url = get.call_args.args[0]
-        called_params = get.call_args.kwargs["params"]
-        self.assertTrue(called_url.endswith("/api/historicdata.csv"))
-        self.assertEqual(called_params["id"], 100001)
-        self.assertEqual(called_params["username"], "synthetic-user")
-        self.assertEqual(called_params["password"], "synthetic-test-password")
+        historic_call = get_historic_csv.call_args
+        self.assertEqual(historic_call.args[0]["name"], "PRTG LAB 01")
+        self.assertEqual(historic_call.args[1], 100001)
+        self.assertEqual(historic_call.kwargs["average_seconds"], 300)
 
     def test_pause_and_resume_endpoints_preserve_prtg_calls(self) -> None:
         self._login()
-        upstream_response = mock.Mock()
-        upstream_response.raise_for_status.return_value = None
-
-        with mock.patch.object(
-            self.flask_app.http,
-            "get",
-            return_value=upstream_response,
-        ) as get:
+        with (
+            mock.patch.object(
+                self.app_module.PRTGClient,
+                "pause_for",
+            ) as pause_for,
+            mock.patch.object(
+                self.app_module.PRTGClient,
+                "pause_indefinitely",
+            ) as pause_indefinitely,
+            mock.patch.object(
+                self.app_module.PRTGClient,
+                "resume",
+            ) as resume,
+        ):
             paused = self.client.post(
                 "/api/sensors/pause",
                 json={
@@ -252,7 +251,20 @@ class ApplicationContractTests(unittest.TestCase):
                     "message": "Synthetic test pause",
                 },
             )
-            pause_call = get.call_args
+            pause_call = pause_for.call_args
+
+            paused_indefinitely = self.client.post(
+                "/api/sensors/pause",
+                json={
+                    "group": "PRTG LAB 01",
+                    "id": 100001,
+                    "indefinite": True,
+                    "sensor_name": "Ping",
+                    "device_name": "SITE-01-001",
+                    "message": "Synthetic indefinite pause",
+                },
+            )
+            indefinite_call = pause_indefinitely.call_args
 
             resumed = self.client.post(
                 "/api/sensors/resume",
@@ -263,17 +275,89 @@ class ApplicationContractTests(unittest.TestCase):
                     "device_name": "SITE-01-001",
                 },
             )
-            resume_call = get.call_args
+            resume_call = resume.call_args
 
         self.assertEqual(paused.status_code, 200)
         self.assertTrue(paused.get_json()["ok"])
-        self.assertTrue(pause_call.args[0].endswith("/api/pauseobjectfor.htm"))
-        self.assertEqual(pause_call.kwargs["params"]["duration"], 60)
+        self.assertEqual(pause_call.args[0]["name"], "PRTG LAB 01")
+        self.assertEqual(pause_call.args[1], 100001)
+        self.assertEqual(pause_call.args[2], 60)
+
+        self.assertEqual(paused_indefinitely.status_code, 200)
+        self.assertTrue(paused_indefinitely.get_json()["ok"])
+        self.assertEqual(
+            paused_indefinitely.get_json()["message"],
+            "Sensor pausado indefinidamente",
+        )
+        self.assertEqual(indefinite_call.args[0]["name"], "PRTG LAB 01")
+        self.assertEqual(indefinite_call.args[1], 100001)
 
         self.assertEqual(resumed.status_code, 200)
         self.assertTrue(resumed.get_json()["ok"])
-        self.assertTrue(resume_call.args[0].endswith("/api/pause.htm"))
-        self.assertEqual(resume_call.kwargs["params"]["action"], 1)
+        self.assertEqual(resume_call.args[0]["name"], "PRTG LAB 01")
+        self.assertEqual(resume_call.args[1], 100001)
+
+    def test_prtg_client_errors_preserve_gateway_responses(self) -> None:
+        self._login()
+        transport_error = self.app_module.PRTGClientError(
+            "sanitized synthetic failure"
+        )
+
+        with mock.patch.object(
+            self.app_module.PRTGClient,
+            "get_historic_csv",
+            side_effect=transport_error,
+        ):
+            history = self.client.get(
+                "/api/history",
+                query_string={
+                    "group": "PRTG LAB 01",
+                    "id": 100001,
+                },
+            )
+
+        with mock.patch.object(
+            self.app_module.PRTGClient,
+            "pause_for",
+            side_effect=transport_error,
+        ):
+            paused = self.client.post(
+                "/api/sensors/pause",
+                json={
+                    "group": "PRTG LAB 01",
+                    "id": 100001,
+                    "duration_minutes": 60,
+                },
+            )
+
+        with mock.patch.object(
+            self.app_module.PRTGClient,
+            "resume",
+            side_effect=transport_error,
+        ):
+            resumed = self.client.post(
+                "/api/sensors/resume",
+                json={
+                    "group": "PRTG LAB 01",
+                    "id": 100001,
+                },
+            )
+
+        self.assertEqual(history.status_code, 502)
+        self.assertEqual(
+            history.get_json(),
+            {"error": "No se pudo consultar PRTG"},
+        )
+        self.assertEqual(paused.status_code, 502)
+        self.assertEqual(
+            paused.get_json(),
+            {"error": "No se pudo pausar el sensor en PRTG"},
+        )
+        self.assertEqual(resumed.status_code, 502)
+        self.assertEqual(
+            resumed.get_json(),
+            {"error": "No se pudo reanudar el sensor en PRTG"},
+        )
 
 
 if __name__ == "__main__":
