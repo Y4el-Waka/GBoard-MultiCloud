@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 import click
 from config import (
     BASE_DIR,
+    DEFAULT_APP_SECRET_KEY,
     load_app_prtg_servers,
     load_app_settings,
     load_environment,
@@ -25,6 +26,7 @@ from config import (
     servers_json_is_configured,
     write_servers_file,
 )
+from database import ensure_monitoring_schema
 from flask import (
     Flask,
     has_request_context,
@@ -414,81 +416,8 @@ def init_db() -> None:
         if "request_path" not in audit_cols:
             conn.execute("ALTER TABLE audit_log ADD COLUMN request_path TEXT")
 
-        # -------------------- Eventos persistentes de sensores --------------------
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS sensor_events(
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                group_name TEXT NOT NULL,
-                sensor_id TEXT NOT NULL,
-                device_name TEXT,
-                sensor_name TEXT,
-                previous_status TEXT,
-                new_status TEXT NOT NULL,
-                event_type TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            )
-            """
-        )
-
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_sensor_events_created_at
-            ON sensor_events(created_at)
-            """
-        )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_sensor_events_sensor
-            ON sensor_events(group_name, sensor_id)
-            """
-        )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_sensor_events_type
-            ON sensor_events(event_type)
-            """
-        )
-
-        # Estado más reciente, compartido con monitor.py
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS sensor_state(
-                group_name TEXT NOT NULL,
-                sensor_id TEXT NOT NULL,
-                device_name TEXT,
-                sensor_name TEXT,
-                status TEXT NOT NULL,
-                last_seen_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                PRIMARY KEY(group_name, sensor_id)
-            )
-            """
-        )
-
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_sensor_state_last_seen
-            ON sensor_state(last_seen_at)
-            """
-        )
-
-        # Incidentes activos de sensores MF y vencimiento de seis horas
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS mf_alert_state(
-                group_name TEXT NOT NULL,
-                sensor_id TEXT NOT NULL,
-                device_name TEXT,
-                sensor_name TEXT,
-                alert_started_at TEXT NOT NULL,
-                deadline_at TEXT NOT NULL,
-                last_status TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                PRIMARY KEY(group_name, sensor_id)
-            )
-            """
-        )
+        # Tablas compartidas con monitor.py; el esquema permanece sin cambios.
+        ensure_monitoring_schema(conn)
 
         # Conserva una ventana razonable sin dejar crecer la base eternamente.
         retention_cutoff = (
@@ -1502,6 +1431,12 @@ def create_app() -> Flask:
         level=APP_SETTINGS.log_level,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+
+    if APP_SETTINGS.secret_key == DEFAULT_APP_SECRET_KEY:
+        app.logger.warning(
+            "APP_SECRET_KEY no configurada; se usa un fallback inseguro "
+            "permitido solo para desarrollo local."
+        )
 
     init_db()
     seed_default_users(app)

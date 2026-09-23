@@ -7,6 +7,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+from datetime import UTC
 from pathlib import Path
 from unittest import mock
 
@@ -132,6 +133,22 @@ class MonitorContractTests(unittest.TestCase):
             loaded_from_file = self.monitor_module.load_servers()
 
         self.assertEqual(loaded_from_file, loaded)
+
+    def test_device_cache_expiry_uses_timezone_aware_utc(self) -> None:
+        collector = self.monitor_module.PRTGMonitor([self.server])
+        client = mock.Mock()
+        client.get_devices.return_value = {
+            "devices": [{"objid": 10001, "host": "192.0.2.10"}]
+        }
+
+        first = collector._get_device_ip_map(self.server, client)
+        second = collector._get_device_ip_map(self.server, client)
+        expires_at, cached = collector.device_ip_cache["PRTG LAB 01"]
+
+        self.assertEqual(first, {"10001": "192.0.2.10"})
+        self.assertIs(second, cached)
+        self.assertEqual(expires_at.tzinfo, UTC)
+        client.get_devices.assert_called_once_with(self.server)
 
     def test_status_normalization_map_is_frozen(self) -> None:
         self.assertEqual(

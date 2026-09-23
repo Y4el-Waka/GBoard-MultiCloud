@@ -16,6 +16,7 @@ from config import (
     load_monitor_prtg_servers,
     load_monitor_settings,
 )
+from database import ensure_monitoring_schema
 from prtg_client import PRTGClient, PRTGClientError
 
 load_environment()
@@ -90,76 +91,7 @@ def init_event_db() -> None:
     with conn_db() as conn:
         conn.execute("PRAGMA journal_mode = WAL")
 
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS sensor_events(
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                group_name TEXT NOT NULL,
-                sensor_id TEXT NOT NULL,
-                device_name TEXT,
-                sensor_name TEXT,
-                previous_status TEXT,
-                new_status TEXT NOT NULL,
-                event_type TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_sensor_events_created_at
-            ON sensor_events(created_at)
-            """
-        )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_sensor_events_sensor
-            ON sensor_events(group_name, sensor_id)
-            """
-        )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_sensor_events_type
-            ON sensor_events(event_type)
-            """
-        )
-
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS sensor_state(
-                group_name TEXT NOT NULL,
-                sensor_id TEXT NOT NULL,
-                device_name TEXT,
-                sensor_name TEXT,
-                status TEXT NOT NULL,
-                last_seen_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                PRIMARY KEY(group_name, sensor_id)
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_sensor_state_last_seen
-            ON sensor_state(last_seen_at)
-            """
-        )
-
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS mf_alert_state(
-                group_name TEXT NOT NULL,
-                sensor_id TEXT NOT NULL,
-                device_name TEXT,
-                sensor_name TEXT,
-                alert_started_at TEXT NOT NULL,
-                deadline_at TEXT NOT NULL,
-                last_status TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                PRIMARY KEY(group_name, sensor_id)
-            )
-            """
-        )
+        ensure_monitoring_schema(conn)
 
         state_cutoff = (
             datetime.now() - timedelta(minutes=PREVIOUS_STATE_MAX_AGE_MINUTES)
@@ -355,7 +287,7 @@ class PRTGMonitor:
         Por defecto se refresca cada 10 minutos.
         """
         server_name = server["name"]
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
 
         cached = self.device_ip_cache.get(server_name)
 

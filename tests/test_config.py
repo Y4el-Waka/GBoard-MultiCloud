@@ -72,6 +72,10 @@ class ConfigurationTests(unittest.TestCase):
             )
 
         self.assertEqual(app_settings.request_timeout, 20)
+        self.assertEqual(
+            app_settings.secret_key,
+            config.DEFAULT_APP_SECRET_KEY,
+        )
         self.assertEqual(monitor_settings.request_timeout, 10)
         self.assertEqual(app_settings.shared.db_path, root / "usuarios.db")
         self.assertEqual(
@@ -86,6 +90,7 @@ class ConfigurationTests(unittest.TestCase):
     def test_environment_overrides_are_typed(self) -> None:
         environment = {
             "PORT": "6000",
+            "APP_SECRET_KEY": "synthetic-explicit-secret",
             "REQUEST_TIMEOUT": "17",
             "HTTP_RETRIES": "5",
             "HTTP_BACKOFF": "1.25",
@@ -100,6 +105,10 @@ class ConfigurationTests(unittest.TestCase):
         monitor_settings = config.load_monitor_settings(environ=environment)
 
         self.assertEqual(app_settings.port, 6000)
+        self.assertEqual(
+            app_settings.secret_key,
+            "synthetic-explicit-secret",
+        )
         self.assertEqual(app_settings.request_timeout, 17)
         self.assertEqual(app_settings.shared.http.retries, 5)
         self.assertEqual(app_settings.shared.http.backoff, 1.25)

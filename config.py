@@ -11,6 +11,7 @@ from typing import Any, Literal, TypedDict
 
 
 BASE_DIR = Path(__file__).resolve().parent
+DEFAULT_APP_SECRET_KEY = "dev-insecure-change-me"
 
 APP_TRUE_VALUES = frozenset({"1", "true", "yes", "y", "on"})
 MONITOR_TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
@@ -259,7 +260,7 @@ def load_app_settings(
     )
     secret_key = env.get(
         "APP_SECRET_KEY",
-        env.get("SECRET_KEY", "dev-insecure-change-me"),
+        env.get("SECRET_KEY", DEFAULT_APP_SECRET_KEY),
     )
 
     return AppSettings(

@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
@@ -135,6 +136,33 @@ class ApplicationContractTests(unittest.TestCase):
         self.assertTrue(payload["data_file_exists"])
         self.assertEqual(payload["servers"], 1)
         self.assertIn("history_cache_entries", payload)
+
+    def test_insecure_default_secret_emits_warning(self) -> None:
+        insecure_settings = replace(
+            self.app_module.APP_SETTINGS,
+            secret_key=self.app_module.DEFAULT_APP_SECRET_KEY,
+        )
+
+        with (
+            mock.patch.object(
+                self.app_module,
+                "APP_SETTINGS",
+                insecure_settings,
+            ),
+            self.assertLogs("app", level="WARNING") as captured,
+        ):
+            created_app = self.app_module.create_app()
+
+        self.assertEqual(
+            created_app.config["SECRET_KEY"],
+            self.app_module.DEFAULT_APP_SECRET_KEY,
+        )
+        self.assertTrue(
+            any(
+                "permitido solo para desarrollo local" in message
+                for message in captured.output
+            )
+        )
 
     def test_invalid_login_contract(self) -> None:
         response = self.client.post(
