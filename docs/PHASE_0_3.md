@@ -214,17 +214,44 @@ The v2 API remains experimental during Phase 0.3. A composition root must
 inject a normalized provider; without one, v2 reports an upstream-unavailable
 response while every legacy path remains functional.
 
+## Phase 0.3F.1: Laboratory metrics provider
+
+Implemented scope:
+
+- concrete `SyntheticHistoricalMetricsSource` using the simulator's real
+  localhost HTTP multichannel history endpoint;
+- explicit `COREVIEW_METRICS_PROVIDER=synthetic` activation, disabled by
+  default and validated by centralized configuration;
+- composition in `create_app()`, while preserving direct provider injection;
+- loopback-only destinations, rejected redirects/userinfo/query strings, and
+  no synthetic transmission of configured PRTG credentials;
+- points mode mapped directly to the simulator's 1-1000 point contract;
+- range mode resolved from the actual logical tick and tick interval, followed
+  by inclusive source-timestamp filtering;
+- sanitized provider errors using the existing HistoryService exception model;
+- real ephemeral HTTP integration tests across simulator, provider,
+  HistoryService, Flask API, serializer, and all five sensor families;
+- reproducible localhost smoke-test documentation.
+
+The provider transports PRTG-shaped source observations only.
+`PRTGMetricAdapter` remains the sole channel/unit normalizer, so partial
+channels, issues, and unknown channels retain their existing contracts.
+
+Range mode never invents timestamps or returns out-of-range observations.
+Intervals needing more than 1000 simulator ticks, containing no logical tick,
+or beginning after current logical time are reported as upstream failures.
+
 ## Remaining planned incremental phases
 
-### 0.3F - Frontend and chart integration
+### 0.3F.2 - Frontend and chart integration
 
 Add multichannel visualization only after backend contracts are stable. Select
 channels and axes by metadata rather than sensor-name conditions, and retain the
 current dashboard until equivalent behavior is verified.
 
-## Entry criteria for Phase 0.3F
+## Entry criteria for Phase 0.3F.2
 
-- Phase 0.3A through 0.3E remain green with the complete regression suite.
+- Phase 0.3A through 0.3F.1 remain green with the complete regression suite.
 - `/api/history` and the current dashboard remain available as a rollback
   path.
 - The frontend consumes only the versioned serializer contract, not PRTG

@@ -199,12 +199,19 @@ Non-fatal source problems remain observable without fabricating zeros:
 Only allowlisted fields are serialized. Raw source payloads, credentials,
 authenticated URLs, and stack traces are never included.
 
+## Laboratory provider
+
+Set `COREVIEW_METRICS_PROVIDER=synthetic` to compose the localhost-only
+laboratory source during normal CoreView startup. The default is `disabled`;
+with no injected provider, this endpoint returns `502` while legacy features
+keep working. See `docs/LAB_METRICS_PROVIDER.md` for a complete smoke test.
+
 ## Current limitations
 
-- A normalized provider must be injected into `create_app()`. With no
-  provider, this endpoint returns `502` while legacy features keep working.
-- Phase 0.3E validates the synthetic provider path; a real PRTG-backed
+- Only the synthetic localhost provider is implemented; a real PRTG-backed
   multichannel provider is future work.
+- Range queries cannot exceed 1000 simulator ticks and return an upstream
+  error when the requested interval contains no real logical sample.
 - There is no normalized cache. The legacy cache is unchanged and separate.
 - Counter-to-rate, aggregation, resampling, and normalized storage are absent.
 - The dashboard does not call this endpoint.

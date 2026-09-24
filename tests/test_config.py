@@ -86,6 +86,22 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(app_settings.shared.http.backoff, 0.5)
         self.assertEqual(monitor_settings.update_interval, 30)
         self.assertEqual(monitor_settings.mf_sla_hours, 6)
+        self.assertEqual(app_settings.metrics_provider, "disabled")
+
+    def test_metrics_provider_requires_an_explicit_supported_value(self) -> None:
+        synthetic = config.load_app_settings(
+            environ={"COREVIEW_METRICS_PROVIDER": " SYNTHETIC "}
+        )
+        disabled = config.load_app_settings(
+            environ={"COREVIEW_METRICS_PROVIDER": "disabled"}
+        )
+
+        self.assertEqual(synthetic.metrics_provider, "synthetic")
+        self.assertEqual(disabled.metrics_provider, "disabled")
+        with self.assertRaisesRegex(ValueError, "COREVIEW_METRICS_PROVIDER"):
+            config.load_app_settings(
+                environ={"COREVIEW_METRICS_PROVIDER": "automatic"}
+            )
 
     def test_environment_overrides_are_typed(self) -> None:
         environment = {

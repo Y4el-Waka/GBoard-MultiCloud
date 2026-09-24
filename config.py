@@ -70,6 +70,7 @@ class AppSettings:
     default_users_json: str
     log_level: str
     flask_debug: bool
+    metrics_provider: Literal["disabled", "synthetic"]
 
 
 @dataclass(frozen=True)
@@ -167,6 +168,17 @@ def env_bool(
         _environment(environ).get(name),
         default,
         true_values=true_values,
+    )
+
+
+def parse_metrics_provider(value: Any) -> Literal["disabled", "synthetic"]:
+    selected = str(value or "disabled").strip().casefold()
+    if selected in {"", "disabled"}:
+        return "disabled"
+    if selected == "synthetic":
+        return "synthetic"
+    raise ValueError(
+        "COREVIEW_METRICS_PROVIDER debe ser 'disabled' o 'synthetic'"
     )
 
 
@@ -303,6 +315,9 @@ def load_app_settings(
         default_users_json=env.get("DEFAULT_USERS_JSON", "[]"),
         log_level=env.get("LOG_LEVEL", "INFO"),
         flask_debug=env_bool("FLASK_DEBUG", False, environ=env),
+        metrics_provider=parse_metrics_provider(
+            env.get("COREVIEW_METRICS_PROVIDER")
+        ),
     )
 
 

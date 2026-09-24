@@ -54,6 +54,7 @@ from sensor_control_service import (
     SensorControlValidationError,
     SensorServerNotFoundError,
 )
+from synthetic_metrics_provider import SyntheticHistoricalMetricsSource
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
@@ -1465,6 +1466,18 @@ def create_app(
 
     app.prtg_servers = load_prtg_servers(app)  # type: ignore[attr-defined]
 
+    selected_normalized_source = normalized_history_source
+    if (
+        selected_normalized_source is None
+        and APP_SETTINGS.metrics_provider == "synthetic"
+    ):
+        selected_normalized_source = SyntheticHistoricalMetricsSource(
+            timeout=app.config["REQUEST_TIMEOUT"],
+        )
+        app.logger.info(
+            "Metrics API v2 laboratory provider enabled: synthetic"
+        )
+
     def current_history_servers():
         return app.prtg_servers  # type: ignore[attr-defined]
 
@@ -1479,7 +1492,7 @@ def create_app(
         cache_ttl_seconds=app.config["HISTORY_CACHE_TTL"],
         cache_max_entries=APP_SETTINGS.history_cache_max_entries,
         logger=app.logger,
-        normalized_source=normalized_history_source,
+        normalized_source=selected_normalized_source,
     )
 
     app.sensor_control_service = SensorControlService(  # type: ignore[attr-defined]
