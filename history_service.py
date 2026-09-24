@@ -65,7 +65,7 @@ class HistoricalMetricsSource(Protocol):
         server: Mapping[str, Any],
         sensor_id: int | str,
         *,
-        points: int,
+        points: int | None,
         start: datetime | None,
         end: datetime | None,
     ) -> Mapping[str, Any]: ...
@@ -215,15 +215,15 @@ class HistoryService:
         sensor_id: int | str,
         *,
         sensor_type: str,
-        points: int = 12,
+        points: int | None = 12,
         source_timezone: tzinfo | None = None,
         start: datetime | None = None,
         end: datetime | None = None,
     ) -> NormalizedHistoryResult:
         """Return canonical samples through the opt-in multichannel path.
 
-        This path intentionally has no cache in Phase 0.3D. The existing
-        legacy parser and cache remain the only behavior used by Flask.
+        This path intentionally has no cache. The legacy parser and cache
+        remain isolated behind the unchanged legacy HTTP contract.
         """
         identifier = str(server_identifier or "").strip()
         sensor_text = str(sensor_id or "").strip()
@@ -233,7 +233,12 @@ class HistoryService:
             raise HistoryValidationError("server identifier e id son obligatorios")
         if isinstance(sensor_id, bool):
             raise HistoryValidationError("sensor_id debe ser un identificador valido")
-        if (
+        if points is None:
+            if start is None or end is None:
+                raise HistoryValidationError(
+                    "start y end son obligatorios cuando points no se proporciona"
+                )
+        elif (
             isinstance(points, bool)
             or not isinstance(points, int)
             or not 1 <= points <= 10_000
@@ -257,7 +262,7 @@ class HistoryService:
             raise HistoryValidationError("start no puede ser posterior a end")
 
         if self._normalized_source is None or self._metric_adapter is None:
-            raise HistoryValidationError(
+            raise HistoryUpstreamError(
                 "la fuente de historico normalizado no esta configurada"
             )
 
@@ -283,9 +288,8 @@ class HistoryService:
         except (HistoricalMetricsSourceError, PRTGClientError) as exc:
             self._logger.warning(
                 "Error consultando historico normalizado "
-                "server=%s sensor=%s source_error=%s",
-                identifier,
-                sensor_text,
+                "server_id=%s source_error=%s",
+                server_id,
                 type(exc).__name__,
             )
             raise HistoryUpstreamError(
@@ -327,9 +331,8 @@ class HistoryService:
             except PRTGAdapterError as exc:
                 self._logger.warning(
                     "Fuente historica normalizada invalida "
-                    "server=%s sensor=%s adapter_error=%s",
-                    identifier,
-                    sensor_text,
+                    "server_id=%s adapter_error=%s",
+                    server_id,
                     type(exc).__name__,
                 )
                 raise HistoryUpstreamError(

@@ -181,13 +181,40 @@ The legacy parser, cache, public route, frontend, collector, snapshot, and
 SQLite remain unchanged. Availability is retained by the normalized path but
 is not inferred from legacy Coverage.
 
+## Phase 0.3E: Versioned normalized metrics API
+
+Implemented scope:
+
+- additive authenticated `GET /api/v2/metrics/history` endpoint;
+- explicit points mode (1-1000) and aware ISO-8601 range mode, without implicit
+  query defaults;
+- stable status policy for validation, missing resources, upstream failures,
+  and unexpected failures;
+- standalone `metrics.serialization` boundary from normalized domain results
+  to versioned JSON-compatible primitives;
+- canonical channel grouping, numeric values, canonical units, and UTC `Z`
+  timestamps;
+- allowlisted serialization for adapter issues and unknown channels;
+- injected `HistoricalMetricsSource` composition seam, with no simulator,
+  adapter, or HTTP transport calls in the route;
+- API contracts for Ping, CPU, memory, bidirectional traffic, full/partial SFP,
+  partial failures, and source failures;
+- no normalized cache and no frontend integration.
+
+The public paths coexist:
+
+~~~text
+PRTG historic CSV -> legacy parser/cache -> /api/history -> current UI
+
+HistoricalMetricsSource -> PRTGMetricAdapter -> NormalizedHistoryResult
+       -> metrics.serialization -> /api/v2/metrics/history
+~~~
+
+The v2 API remains experimental during Phase 0.3. A composition root must
+inject a normalized provider; without one, v2 reports an upstream-unavailable
+response while every legacy path remains functional.
+
 ## Remaining planned incremental phases
-
-### 0.3E - Metrics API compatibility
-
-Design an additive metrics API or versioned response contract. Preserve current
-public routes and payloads. Resolve stable server-ID transition and serialization
-rules before exposing canonical identity externally.
 
 ### 0.3F - Frontend and chart integration
 
@@ -195,17 +222,20 @@ Add multichannel visualization only after backend contracts are stable. Select
 channels and axes by metadata rather than sensor-name conditions, and retain the
 current dashboard until equivalent behavior is verified.
 
-## Entry criteria for Phase 0.3E
+## Entry criteria for Phase 0.3F
 
-- Phase 0.3A through 0.3D remain green with the complete regression suite.
-- The new API is additive or explicitly versioned; /api/history remains
-  unchanged.
-- Serialization rules preserve numeric values, canonical units, aware UTC
-  timestamps, stable identity, issues, and unknown channels.
-- Provider/query semantics and a separate cache namespace are decided before
-  exposing normalized history publicly.
-- Authorization and source lookup reuse current application boundaries without
-  moving presentation behavior into HistoryService.
+- Phase 0.3A through 0.3E remain green with the complete regression suite.
+- `/api/history` and the current dashboard remain available as a rollback
+  path.
+- The frontend consumes only the versioned serializer contract, not PRTG
+  source labels or adapter internals.
+- Channel selection and axes are driven by canonical definitions and units.
+- Loading, empty, partial-channel, unknown-channel, issue, and upstream-error
+  states have explicit UI behavior.
+- Traffic IN/OUT and partial SFP layouts are designed before replacing any
+  current chart.
+- Any provider used for manual UI validation is configured at the composition
+  root and does not create a simulator dependency in Flask.
 
 ## Migration principles
 

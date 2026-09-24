@@ -39,11 +39,14 @@ from flask import (
     url_for,
 )
 from history_service import (
+    HistoricalMetricsSource,
+    HistorySensorNotFoundError,
     HistoryServerNotFoundError,
     HistoryService,
     HistoryUpstreamError,
     HistoryValidationError,
 )
+from metrics.serialization import serialize_normalized_history
 from prtg_client import PRTGClient
 from sensor_control_service import (
     SensorControlService,
@@ -74,6 +77,7 @@ ALERT_SOUND_MAX_BYTES = APP_SETTINGS.alert_sound_max_bytes
 SENSOR_EVENT_RETENTION_DAYS = SHARED_SETTINGS.event_retention_days
 AUDIT_LOG_MAX_LIMIT = APP_SETTINGS.audit_log_max_limit
 EXPORT_LOG_WINDOWS = {12, 24, 72}
+METRICS_API_V2_MAX_POINTS = 1000
 
 
 
@@ -110,6 +114,21 @@ def bool_from_payload(value: Any) -> bool:
         return value.strip().lower() in {"1", "true", "yes", "y", "on", "activo", "active"}
 
     return False
+
+
+def _parse_aware_iso8601(value: str | None, field_name: str) -> datetime:
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError(f"{field_name} debe ser ISO-8601")
+    if text.endswith(("Z", "z")):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        raise ValueError(f"{field_name} debe ser ISO-8601 valido") from None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"{field_name} debe incluir timezone")
+    return parsed.astimezone(UTC)
 
 
 # -------------------- PRTG server config --------------------
@@ -1410,7 +1429,10 @@ def admon_required(view):
 
 
 # -------------------- App factory --------------------
-def create_app() -> Flask:
+def create_app(
+    *,
+    normalized_history_source: HistoricalMetricsSource | None = None,
+) -> Flask:
     app = Flask(__name__, static_folder="static", template_folder="templates")
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
@@ -1457,6 +1479,7 @@ def create_app() -> Flask:
         cache_ttl_seconds=app.config["HISTORY_CACHE_TTL"],
         cache_max_entries=APP_SETTINGS.history_cache_max_entries,
         logger=app.logger,
+        normalized_source=normalized_history_source,
     )
 
     app.sensor_control_service = SensorControlService(  # type: ignore[attr-defined]
@@ -1872,6 +1895,146 @@ def create_app() -> Flask:
 
         except HistoryUpstreamError:
             return jsonify({"error": "No se pudo consultar PRTG"}), 502
+
+    @app.get("/api/v2/metrics/history")
+    @login_required
+    def api_metrics_history_v2():
+        server = request.args.get("server", "").strip()
+        sensor_id = request.args.get("sensor_id", "").strip()
+        sensor_type = request.args.get("sensor_type", "").strip()
+        points_raw = request.args.get("points")
+        start_raw = request.args.get("start")
+        end_raw = request.args.get("end")
+
+        if not server or not sensor_id or not sensor_type:
+            return jsonify(
+                {
+                    "error": "server, sensor_id y sensor_type son obligatorios",
+                    "code": "invalid_request",
+                }
+            ), 400
+
+        has_points = points_raw is not None
+        has_start = start_raw is not None
+        has_end = end_raw is not None
+
+        if has_points and (has_start or has_end):
+            return jsonify(
+                {
+                    "error": "points no puede combinarse con start/end",
+                    "code": "invalid_request",
+                }
+            ), 400
+
+        if not has_points and not has_start and not has_end:
+            return jsonify(
+                {
+                    "error": "debes proporcionar points o start/end",
+                    "code": "invalid_request",
+                }
+            ), 400
+
+        if has_start != has_end:
+            return jsonify(
+                {
+                    "error": "start y end deben proporcionarse juntos",
+                    "code": "invalid_request",
+                }
+            ), 400
+
+        points: int | None = None
+        start: datetime | None = None
+        end: datetime | None = None
+
+        if has_points:
+            try:
+                points = int(points_raw)
+            except (TypeError, ValueError):
+                return jsonify(
+                    {
+                        "error": "points debe ser un entero positivo",
+                        "code": "invalid_request",
+                    }
+                ), 400
+
+            if not 1 <= points <= METRICS_API_V2_MAX_POINTS:
+                return jsonify(
+                    {
+                        "error": (
+                            "points debe estar entre 1 y "
+                            f"{METRICS_API_V2_MAX_POINTS}"
+                        ),
+                        "code": "invalid_request",
+                    }
+                ), 400
+        else:
+            try:
+                start = _parse_aware_iso8601(start_raw, "start")
+                end = _parse_aware_iso8601(end_raw, "end")
+            except ValueError as exc:
+                return jsonify(
+                    {
+                        "error": str(exc),
+                        "code": "invalid_request",
+                    }
+                ), 400
+
+            if start >= end:
+                return jsonify(
+                    {
+                        "error": "start debe ser anterior a end",
+                        "code": "invalid_request",
+                    }
+                ), 400
+
+        try:
+            result = app.history_service.get_normalized_history(  # type: ignore[attr-defined]
+                server,
+                sensor_id,
+                sensor_type=sensor_type,
+                points=points,
+                start=start,
+                end=end,
+            )
+            return jsonify(serialize_normalized_history(result))
+
+        except HistoryServerNotFoundError:
+            return jsonify(
+                {"error": "Servidor no encontrado", "code": "server_not_found"}
+            ), 404
+
+        except HistorySensorNotFoundError:
+            return jsonify(
+                {"error": "Sensor no encontrado", "code": "sensor_not_found"}
+            ), 404
+
+        except HistoryValidationError:
+            return jsonify(
+                {
+                    "error": "Solicitud de metricas invalida",
+                    "code": "invalid_request",
+                }
+            ), 400
+
+        except HistoryUpstreamError:
+            return jsonify(
+                {
+                    "error": "No se pudo consultar la fuente de metricas",
+                    "code": "upstream_error",
+                }
+            ), 502
+
+        except Exception as exc:
+            app.logger.error(
+                "Error inesperado en metrics API v2 error_type=%s",
+                type(exc).__name__,
+            )
+            return jsonify(
+                {
+                    "error": "Error interno",
+                    "code": "internal_error",
+                }
+            ), 500
 
 
     @app.route("/api/sensors/pause", methods=["POST"])
