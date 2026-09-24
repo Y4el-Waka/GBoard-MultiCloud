@@ -70,6 +70,28 @@ class SimulatorMetricsHistorySource:
                 f"synthetic sensor {sensor_id} was not found"
             ) from None
 
+    def fetch_sensor_metadata(
+        self,
+        server: Mapping[str, Any],
+        sensor_id: int | str,
+    ) -> Mapping[str, Any]:
+        if self.error is not None:
+            raise self.error
+        try:
+            payload = self.simulator.multichannel_sensor(
+                "prtg-01",
+                int(sensor_id),
+            )
+        except KeyError:
+            raise HistoricalMetricsSensorNotFoundError(
+                f"synthetic sensor {sensor_id} was not found"
+            ) from None
+        return {
+            "server_id": payload["server_id"],
+            "sensor_id": payload["objid"],
+            "sensor_type": payload["sensor_type"],
+        }
+
 
 class MetricsAPIV2ContractTests(unittest.TestCase):
     @classmethod
@@ -205,8 +227,69 @@ class MetricsAPIV2ContractTests(unittest.TestCase):
         response = self.query("ping")
 
         self.assertEqual(response.status_code, 401)
+
+        metadata = self.client.get(
+            "/api/v2/metrics/sensor-metadata",
+            query_string={
+                "server": "PRTG LAB 01",
+                "sensor_id": self.sensor_id("ping"),
+            },
+        )
+        self.assertEqual(metadata.status_code, 401)
         self.assertEqual(response.get_json(), {"error": "Sesion requerida"})
         self.assertEqual(self.source.calls, [])
+
+    def test_sensor_metadata_resolves_explicit_type_and_stable_identity(self) -> None:
+        self.login()
+        for family in ("ping", "cpu", "memory", "traffic", "sfp"):
+            with self.subTest(family=family):
+                response = self.client.get(
+                    "/api/v2/metrics/sensor-metadata",
+                    query_string={
+                        "server": "PRTG LAB 01",
+                        "sensor_id": self.sensor_id(family),
+                    },
+                )
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(
+                    response.get_json(),
+                    {
+                        "schema_version": "2.0",
+                        "sensor": {
+                            "server_id": "srv-prtg-01",
+                            "sensor_id": str(self.sensor_id(family)),
+                            "sensor_type": family,
+                        },
+                    },
+                )
+
+    def test_sensor_metadata_errors_are_typed_and_safe(self) -> None:
+        self.login()
+        missing_params = self.client.get(
+            "/api/v2/metrics/sensor-metadata",
+            query_string={"server": "PRTG LAB 01"},
+        )
+        missing_sensor = self.client.get(
+            "/api/v2/metrics/sensor-metadata",
+            query_string={"server": "PRTG LAB 01", "sensor_id": 999999},
+        )
+        self.source.error = HistoricalMetricsSourceError(
+            "password=must-not-leak"
+        )
+        upstream = self.client.get(
+            "/api/v2/metrics/sensor-metadata",
+            query_string={
+                "server": "PRTG LAB 01",
+                "sensor_id": self.sensor_id("ping"),
+            },
+        )
+
+        self.assertEqual(missing_params.status_code, 400)
+        self.assertEqual(missing_sensor.status_code, 404)
+        self.assertEqual(missing_sensor.get_json()["code"], "sensor_not_found")
+        self.assertEqual(upstream.status_code, 502)
+        self.assertEqual(upstream.get_json()["code"], "upstream_error")
+        self.assertNotIn("must-not-leak", upstream.get_data(as_text=True))
 
     def test_required_identity_parameters_are_validated(self) -> None:
         self.login()

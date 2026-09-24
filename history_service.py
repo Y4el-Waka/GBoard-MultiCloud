@@ -70,6 +70,12 @@ class HistoricalMetricsSource(Protocol):
         end: datetime | None,
     ) -> Mapping[str, Any]: ...
 
+    def fetch_sensor_metadata(
+        self,
+        server: Mapping[str, Any],
+        sensor_id: int | str,
+    ) -> Mapping[str, Any]: ...
+
 
 @dataclass(frozen=True, slots=True)
 class NormalizedHistoryResult:
@@ -94,6 +100,14 @@ class NormalizedHistoryResult:
             for channel in self.channels
             if channel.key in grouped
         }
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizedSensorMetadata:
+    """Stable identity and explicit metric family resolved by a provider."""
+
+    identity: SensorIdentity
+    sensor_type: str
 
 
 def _utcnow_naive() -> datetime:
@@ -380,6 +394,87 @@ class HistoryService:
             issues=tuple(issues),
             start=result_start,
             end=result_end,
+        )
+
+    def get_normalized_sensor_metadata(
+        self,
+        server_identifier: str,
+        sensor_id: int | str,
+    ) -> NormalizedSensorMetadata:
+        """Resolve provider metadata without inspecting mutable sensor names."""
+        identifier = str(server_identifier or "").strip()
+        sensor_text = str(sensor_id or "").strip()
+        if not identifier or not sensor_text or isinstance(sensor_id, bool):
+            raise HistoryValidationError(
+                "server identifier e id son obligatorios"
+            )
+
+        if self._normalized_source is None:
+            raise HistoryUpstreamError(
+                "la fuente de historico normalizado no esta configurada"
+            )
+
+        resolver = getattr(
+            self._normalized_source,
+            "fetch_sensor_metadata",
+            None,
+        )
+        if not callable(resolver):
+            raise HistoryUpstreamError(
+                "la fuente normalizada no ofrece metadata de sensores"
+            )
+
+        server = self._lookup_server(identifier)
+        server_id = str(server.get("id") or "").strip()
+        if not server_id:
+            raise HistoryValidationError(
+                "el servidor requiere un id estable para metadata normalizada"
+            )
+
+        try:
+            payload = resolver(server, sensor_id)
+        except HistoricalMetricsSensorNotFoundError:
+            raise HistorySensorNotFoundError(
+                f"Sensor '{sensor_text}' no encontrado"
+            ) from None
+        except (HistoricalMetricsSourceError, PRTGClientError) as exc:
+            self._logger.warning(
+                "Error consultando metadata normalizada "
+                "server_id=%s source_error=%s",
+                server_id,
+                type(exc).__name__,
+            )
+            raise HistoryUpstreamError(
+                "No se pudo consultar metadata normalizada"
+            ) from None
+
+        if not isinstance(payload, Mapping):
+            raise HistoryUpstreamError(
+                "La fuente normalizada devolvio metadata invalida"
+            )
+
+        payload_sensor_id = str(
+            payload.get("sensor_id", payload.get("objid", ""))
+        ).strip()
+        if payload_sensor_id != sensor_text:
+            raise HistoryUpstreamError(
+                "La identidad de metadata normalizada no coincide"
+            )
+
+        sensor_type = str(payload.get("sensor_type") or "").strip().casefold()
+        try:
+            get_sensor_definition(sensor_type)
+        except KeyError:
+            raise HistoryValidationError(
+                "tipo de sensor normalizado no soportado"
+            ) from None
+
+        return NormalizedSensorMetadata(
+            identity=SensorIdentity(
+                server_id=server_id,
+                sensor_id=sensor_text,
+            ),
+            sensor_type=sensor_type,
         )
 
     def clear(self) -> None:

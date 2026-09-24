@@ -87,6 +87,7 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(monitor_settings.update_interval, 30)
         self.assertEqual(monitor_settings.mf_sla_hours, 6)
         self.assertEqual(app_settings.metrics_provider, "disabled")
+        self.assertFalse(app_settings.metrics_ui_enabled)
 
     def test_metrics_provider_requires_an_explicit_supported_value(self) -> None:
         synthetic = config.load_app_settings(
@@ -102,6 +103,17 @@ class ConfigurationTests(unittest.TestCase):
             config.load_app_settings(
                 environ={"COREVIEW_METRICS_PROVIDER": "automatic"}
             )
+
+    def test_metrics_ui_feature_flag_is_explicit_and_typed(self) -> None:
+        enabled = config.load_app_settings(
+            environ={"COREVIEW_METRICS_UI_ENABLED": "true"}
+        )
+        disabled = config.load_app_settings(
+            environ={"COREVIEW_METRICS_UI_ENABLED": "false"}
+        )
+
+        self.assertTrue(enabled.metrics_ui_enabled)
+        self.assertFalse(disabled.metrics_ui_enabled)
 
     def test_environment_overrides_are_typed(self) -> None:
         environment = {

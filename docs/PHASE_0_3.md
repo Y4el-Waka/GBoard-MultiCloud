@@ -241,28 +241,48 @@ Range mode never invents timestamps or returns out-of-range observations.
 Intervals needing more than 1000 simulator ticks, containing no logical tick,
 or beginning after current logical time are reported as upstream failures.
 
-## Remaining planned incremental phases
+## Phase 0.3F.2: Multichannel frontend integration
 
-### 0.3F.2 - Frontend and chart integration
+Implemented scope:
 
-Add multichannel visualization only after backend contracts are stable. Select
-channels and axes by metadata rather than sensor-name conditions, and retain the
-current dashboard until equivalent behavior is verified.
+- explicit `COREVIEW_METRICS_UI_ENABLED` feature flag, disabled by default and
+  rendered to JavaScript only as a safe boolean;
+- authenticated v2 sensor-metadata resolver through HistoryService and the
+  configured provider, without sensor-name inference or snapshot changes;
+- small framework-free frontend client for metadata/history requests,
+  validation, cancellation, stale-response protection, and fallback policy;
+- canonical Ping, CPU, memory, traffic, and SFP chart layouts using the
+  existing Chart.js dependency;
+- separation of incompatible units into independent charts;
+- visual-only scaling for bytes and bit rates while preserving numeric base
+  values;
+- partial-channel, issue, unknown-channel, loading, success, empty, and error
+  states in the reused history modal;
+- allowlisted fallback to the unchanged `/api/history` path, visibly marked as
+  legacy and retained for the active sensor to avoid repeated failing probes;
+- deterministic destruction of Chart.js instances and cancellation/ignoring
+  of obsolete requests;
+- built-in Node frontend tests without a package dependency;
+- updated frontend integrity hashes and a reproducible visual checklist.
 
-## Entry criteria for Phase 0.3F.2
+The default dashboard remains legacy. With both the synthetic provider and UI
+flag enabled, the browser resolves explicit source metadata and requests 24
+real source points. It displays the observed UTC range in browser-local time;
+it never labels those points as hours.
 
-- Phase 0.3A through 0.3F.1 remain green with the complete regression suite.
-- `/api/history` and the current dashboard remain available as a rollback
-  path.
-- The frontend consumes only the versioned serializer contract, not PRTG
-  source labels or adapter internals.
-- Channel selection and axes are driven by canonical definitions and units.
-- Loading, empty, partial-channel, unknown-channel, issue, and upstream-error
-  states have explicit UI behavior.
-- Traffic IN/OUT and partial SFP layouts are designed before replacing any
-  current chart.
-- Any provider used for manual UI validation is configured at the composition
-  root and does not create a simulator dependency in Flask.
+Phase 0.3 now has an end-to-end laboratory path from source channels through
+the provider-neutral domain and versioned API to a multichannel presentation.
+This is not a full dashboard redesign and does not make the experimental v2
+contract or synthetic provider a production default.
+
+## Phase 0.3 closure boundary
+
+- `/api/history`, the legacy snapshot, collector, SQLite, MF, and sensor
+  controls remain compatibility surfaces.
+- Real PRTG multichannel acquisition, normalized persistence/cache,
+  counter-to-rate, aggregation, and cloud infrastructure remain future work.
+- A future visual redesign should consume canonical v2 metadata rather than
+  move provider mappings into JavaScript.
 
 ## Migration principles
 

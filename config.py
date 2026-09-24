@@ -71,6 +71,7 @@ class AppSettings:
     log_level: str
     flask_debug: bool
     metrics_provider: Literal["disabled", "synthetic"]
+    metrics_ui_enabled: bool
 
 
 @dataclass(frozen=True)
@@ -317,6 +318,11 @@ def load_app_settings(
         flask_debug=env_bool("FLASK_DEBUG", False, environ=env),
         metrics_provider=parse_metrics_provider(
             env.get("COREVIEW_METRICS_PROVIDER")
+        ),
+        metrics_ui_enabled=env_bool(
+            "COREVIEW_METRICS_UI_ENABLED",
+            False,
+            environ=env,
         ),
     )
 

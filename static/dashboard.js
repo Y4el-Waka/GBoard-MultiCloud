@@ -10,9 +10,15 @@
   const REFRESH_MS = 30_000;
   const HISTORY_MINUTES = 120;
   const HISTORY_AVG_SECONDS = 300;
+  const METRICS_HISTORY_POINTS = 24;
 
   const USER_ROLE = String(document.body?.dataset.userRole || 'lector').trim().toLowerCase();
   const USERNAME = String(document.body?.dataset.username || 'default').trim().toLowerCase() || 'default';
+  const METRICS_UI_ENABLED = document.body?.dataset.metricsUiEnabled === 'true';
+  const METRICS_HISTORY = window.CoreViewMetricsHistory || null;
+  const metricsHistoryClient = METRICS_UI_ENABLED && METRICS_HISTORY
+    ? METRICS_HISTORY.createClient()
+    : null;
   const ALERT_SETTINGS_KEY = `prtg_alert_settings_${USERNAME}`;
 
   const ADMIN_ROLES = new Set(['admin', 'admon']);
@@ -42,8 +48,10 @@
   let statusChart = null;
   let metricsChart = null;
   let historyChart = null;
+  const normalizedHistoryCharts = [];
   let historyRefreshInterval = null;
   let activeHistoryRequest = null;
+  let historyRenderVersion = 0;
 
   let lastDownFingerprint = '';
   let audioUnlocked = false;
@@ -2460,6 +2468,47 @@ function renderSensorsView() {
     $('history-modal')?.classList.add('flex');
   }
 
+  function setHistoryMode(message = '', legacy = false) {
+    const badge = $('history-mode');
+    if (!badge) return;
+    badge.textContent = message;
+    badge.classList.toggle('hidden', !message);
+    badge.classList.toggle('is-legacy', Boolean(legacy));
+  }
+
+  function setHistoryState(message = '', kind = '') {
+    const state = $('history-state');
+    if (!state) return;
+    state.textContent = message;
+    state.className = 'history-state';
+    if (kind) state.classList.add(`is-${kind}`);
+    state.classList.toggle('hidden', !message);
+  }
+
+  function setHistoryDiagnostics(message = '') {
+    const diagnostics = $('history-diagnostics');
+    if (!diagnostics) return;
+    diagnostics.textContent = message;
+    diagnostics.classList.toggle('hidden', !message);
+  }
+
+  function setHistoryError(message = '') {
+    const errorBox = $('history-error');
+    if (!errorBox) return;
+    errorBox.textContent = message;
+    errorBox.classList.toggle('hidden', !message);
+  }
+
+  function destroyHistoryCharts() {
+    if (historyChart) {
+      historyChart.destroy();
+      historyChart = null;
+    }
+    METRICS_HISTORY?.destroyChartInstances(normalizedHistoryCharts);
+    document.querySelectorAll('.metrics-history-chart-panel').forEach(panel => panel.remove());
+    $('history-legacy-panel')?.classList.remove('hidden');
+  }
+
   function closeHistoryModal() {
     $('history-modal')?.classList.add('hidden');
     $('history-modal')?.classList.remove('flex');
@@ -2469,6 +2518,13 @@ function renderSensorsView() {
       historyRefreshInterval = null;
     }
 
+    historyRenderVersion += 1;
+    metricsHistoryClient?.cancel();
+    destroyHistoryCharts();
+    setHistoryState('');
+    setHistoryMode('');
+    setHistoryDiagnostics('');
+    setHistoryError('');
     activeHistoryRequest = null;
   }
 
@@ -2477,23 +2533,28 @@ function renderSensorsView() {
     const id = button.dataset.id;
     const title = button.dataset.title;
 
-   activeHistoryRequest = {
-  group,
-  id,
-  title,
-  deviceName: button.dataset.device || '',
-  sensorName: button.dataset.sensor || title || '',
-  status: button.dataset.status || '',
-  message: button.dataset.message || '',
-  lastvalue: button.dataset.lastvalue || ''
-};
+    metricsHistoryClient?.cancel();
+    activeHistoryRequest = {
+      group,
+      id,
+      title,
+      deviceName: button.dataset.device || '',
+      sensorName: button.dataset.sensor || title || '',
+      status: button.dataset.status || '',
+      message: button.dataset.message || '',
+      lastvalue: button.dataset.lastvalue || '',
+      forceLegacy: false,
+      fallbackMessage: ''
+    };
 
     if ($('history-title')) {
       $('history-title').textContent = title || 'Histórico';
     }
 
     if ($('history-subtitle')) {
-      $('history-subtitle').textContent = `${group} · Sensor ${id} · últimas ${HISTORY_MINUTES} min`;
+      $('history-subtitle').textContent = METRICS_UI_ENABLED
+        ? `${group} · Sensor ${id} · ${METRICS_HISTORY_POINTS} puntos solicitados`
+        : `${group} · Sensor ${id} · últimas ${HISTORY_MINUTES} min`;
     }
 
     await fetchAndRenderHistory({
@@ -2619,16 +2680,11 @@ function renderSensorsView() {
       });
   }
 
-  async function fetchAndRenderHistory({ group, id, open = false }) {
-    if ($('history-error')) {
-      $('history-error').classList.add('hidden');
-      $('history-error').textContent = '';
-    }
-
-    if (open) {
-      openHistoryModal();
-    }
-
+  async function fetchAndRenderLegacyHistory({ group, id }, requestVersion, fallbackMessage = '') {
+    setHistoryMode(
+      fallbackMessage ? `Modo legacy · ${fallbackMessage}` : 'Histórico legacy',
+      true
+    );
     try {
       const params = new URLSearchParams({
         group,
@@ -2638,6 +2694,7 @@ function renderSensorsView() {
       });
 
       const payload = await fetchJSON(`/api/history?${params.toString()}`, 1);
+      if (requestVersion !== historyRenderVersion) return;
       const ctx = $('historyChart')?.getContext('2d');
 
       if (!ctx) return;
@@ -2645,13 +2702,14 @@ function renderSensorsView() {
       const chartDatasets = buildHistoryChartDatasets(payload);
 
       if (!chartDatasets.length) {
-        if ($('history-error')) {
-          $('history-error').textContent = payload.error || 'No hubo puntos históricos para este sensor en la ventana consultada.';
-          $('history-error').classList.remove('hidden');
-        }
-
+        setHistoryState(
+          payload.error || 'No hubo puntos históricos para este sensor en la ventana consultada.',
+          'empty'
+        );
         return;
       }
+
+      $('history-legacy-panel')?.classList.remove('hidden');
 
       const data = {
         datasets: chartDatasets
@@ -2746,11 +2804,133 @@ function renderSensorsView() {
       if ($('history-subtitle')) {
         $('history-subtitle').textContent = `${group} · Sensor ${id} · últimas ${HISTORY_MINUTES} min · auto-refresh ${REFRESH_MS / 1000}s`;
       }
+      setHistoryState('Histórico legacy cargado.', 'success');
     } catch (error) {
-      if ($('history-error')) {
-        $('history-error').textContent = `No se pudo cargar el histórico. ${error.message}`;
-        $('history-error').classList.remove('hidden');
+      if (requestVersion !== historyRenderVersion) return;
+      setHistoryState('');
+      setHistoryError(`No se pudo cargar el histórico. ${error.message}`);
+    }
+  }
+
+  function renderNormalizedHistory(payload, group, id) {
+    const chartGrid = $('history-chart-grid');
+    if (!chartGrid || typeof Chart === 'undefined') return false;
+    const chartGroups = METRICS_HISTORY.buildChartGroups(payload);
+    if (!chartGroups.length) return false;
+
+    $('history-legacy-panel')?.classList.add('hidden');
+    for (const groupDefinition of chartGroups) {
+      const panel = document.createElement('section');
+      panel.className = 'history-chart-panel metrics-history-chart-panel';
+
+      const heading = document.createElement('h4');
+      heading.className = 'history-chart-heading';
+      heading.textContent = `${groupDefinition.title} (${groupDefinition.unit})`;
+
+      const canvasBox = document.createElement('div');
+      canvasBox.className = 'history-chart-canvas';
+      const canvas = document.createElement('canvas');
+      canvasBox.appendChild(canvas);
+      panel.appendChild(heading);
+      panel.appendChild(canvasBox);
+      chartGrid.appendChild(panel);
+
+      normalizedHistoryCharts.push(
+        new Chart(canvas.getContext('2d'), METRICS_HISTORY.chartConfig(groupDefinition))
+      );
+    }
+
+    const diagnostics = METRICS_HISTORY.diagnosticState(payload);
+    const diagnosticParts = [];
+    if (diagnostics.missing.length) {
+      diagnosticParts.push(`${diagnostics.missing.length} canal(es) opcional(es) no disponible(s)`);
+    }
+    if (diagnostics.issues) {
+      diagnosticParts.push(`${diagnostics.issues} issue(s) de fuente`);
+    }
+    if (diagnostics.unknown) {
+      diagnosticParts.push(`${diagnostics.unknown} canal(es) desconocido(s)`);
+    }
+    setHistoryDiagnostics(diagnosticParts.join(' · '));
+    setHistoryMode(
+      diagnostics.partial ? 'Métricas v2 · datos parciales' : 'Métricas v2',
+      false
+    );
+    setHistoryState(
+      diagnostics.partial
+        ? 'Se muestran todos los canales válidos disponibles.'
+        : 'Histórico multicanal cargado.',
+      diagnostics.partial ? 'partial' : 'success'
+    );
+    if ($('history-subtitle')) {
+      const observedRange = METRICS_HISTORY.formatObservedRange(payload.range);
+      $('history-subtitle').textContent = `${group} · Sensor ${id} · ${payload.sensor.sensor_type.toUpperCase()} · ${observedRange} · auto-refresh ${REFRESH_MS / 1000}s`;
+    }
+    return true;
+  }
+
+  async function fetchAndRenderHistory(request) {
+    const { group, id, open = false } = request;
+    const requestVersion = ++historyRenderVersion;
+    if (open) openHistoryModal();
+
+    setHistoryError('');
+    setHistoryDiagnostics('');
+    setHistoryMode('');
+    setHistoryState('Cargando histórico…', 'loading');
+    destroyHistoryCharts();
+
+    if (METRICS_UI_ENABLED && !metricsHistoryClient) {
+      setHistoryState('');
+      setHistoryError('La integración de métricas v2 no está disponible en esta página.');
+      return;
+    }
+
+    const useMetricsV2 = Boolean(
+      METRICS_UI_ENABLED &&
+      metricsHistoryClient &&
+      !request.forceLegacy
+    );
+    if (!useMetricsV2) {
+      await fetchAndRenderLegacyHistory(
+        { group, id },
+        requestVersion,
+        request.fallbackMessage || (METRICS_UI_ENABLED ? 'sensor no compatible con v2' : '')
+      );
+      return;
+    }
+
+    try {
+      const result = await metricsHistoryClient.load({
+        server: group,
+        sensorId: id,
+        points: METRICS_HISTORY_POINTS
+      });
+      if (requestVersion !== historyRenderVersion) return;
+      if (!renderNormalizedHistory(result.history, group, id)) {
+        setHistoryState('No hay canales válidos para representar.', 'empty');
       }
+    } catch (error) {
+      if (METRICS_HISTORY.isCancelledRequest(error) || requestVersion !== historyRenderVersion) {
+        return;
+      }
+      if (METRICS_HISTORY.shouldFallbackToLegacy(error)) {
+        const fallbackMessage = error.code === 'sensor_not_found'
+          ? 'sensor sin histórico normalizado'
+          : 'provider v2 no disponible';
+        if (activeHistoryRequest) {
+          activeHistoryRequest.forceLegacy = true;
+          activeHistoryRequest.fallbackMessage = fallbackMessage;
+        }
+        await fetchAndRenderLegacyHistory(
+          { group, id },
+          requestVersion,
+          fallbackMessage
+        );
+        return;
+      }
+      setHistoryState('');
+      setHistoryError(`No se pudo cargar el histórico multicanal. ${error.message}`);
     }
   }
 

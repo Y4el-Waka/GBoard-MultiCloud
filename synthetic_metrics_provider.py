@@ -137,6 +137,40 @@ class SyntheticHistoricalMetricsSource:
 
         return {**payload, "samples": filtered_samples}
 
+    def fetch_sensor_metadata(
+        self,
+        server: Mapping[str, Any],
+        sensor_id: int | str,
+    ) -> Mapping[str, Any]:
+        """Return only the explicit identity/type fields needed by clients."""
+        base_url = self._local_simulator_url(server)
+        sensor_text = str(sensor_id or "").strip()
+        if not sensor_text or isinstance(sensor_id, bool):
+            raise HistoricalMetricsSourceError(
+                "synthetic sensor identity is invalid"
+            )
+
+        payload = self._request_json(
+            f"{base_url}/api/multichannel.json",
+            params={"id": sensor_text},
+        )
+        if not isinstance(payload, dict):
+            raise HistoricalMetricsSourceError(
+                "synthetic metrics source returned invalid metadata"
+            )
+        payload_sensor_id = str(payload.get("objid") or "").strip()
+        sensor_type = str(payload.get("sensor_type") or "").strip().casefold()
+        if payload_sensor_id != sensor_text or not sensor_type:
+            raise HistoricalMetricsSourceError(
+                "synthetic metrics source returned mismatched metadata"
+            )
+
+        return {
+            "server_id": str(payload.get("server_id") or "").strip(),
+            "sensor_id": payload_sensor_id,
+            "sensor_type": sensor_type,
+        }
+
     def _request_history(
         self,
         base_url: str,
@@ -145,11 +179,41 @@ class SyntheticHistoricalMetricsSource:
         points: int,
     ) -> dict[str, Any]:
         endpoint = f"{base_url}/api/multichannel_history.json"
+        payload = self._request_json(
+            endpoint,
+            params={"id": sensor_id, "points": points},
+        )
+
+        if not isinstance(payload, dict) or payload.get("synthetic") is not True:
+            raise HistoricalMetricsSourceError(
+                "synthetic metrics source returned an invalid payload"
+            )
+        if str(payload.get("sensor_id") or "").strip() != sensor_id:
+            raise HistoricalMetricsSourceError(
+                "synthetic metrics source returned a mismatched sensor"
+            )
+        samples = payload.get("samples")
+        if (
+            not isinstance(samples, Sequence)
+            or isinstance(samples, (str, bytes, bytearray))
+            or not samples
+        ):
+            raise HistoricalMetricsSourceError(
+                "synthetic metrics source returned no samples"
+            )
+        return payload
+
+    def _request_json(
+        self,
+        endpoint: str,
+        *,
+        params: Mapping[str, Any],
+    ) -> Any:
         response = None
         try:
             response = self._request_get(
                 endpoint,
-                params={"id": sensor_id, "points": points},
+                params=dict(params),
                 timeout=self.timeout,
                 allow_redirects=False,
                 headers={"Accept": "application/json"},
@@ -184,24 +248,6 @@ class SyntheticHistoricalMetricsSource:
             close = getattr(response, "close", None)
             if callable(close):
                 close()
-
-        if not isinstance(payload, dict) or payload.get("synthetic") is not True:
-            raise HistoricalMetricsSourceError(
-                "synthetic metrics source returned an invalid payload"
-            )
-        if str(payload.get("sensor_id") or "").strip() != sensor_id:
-            raise HistoricalMetricsSourceError(
-                "synthetic metrics source returned a mismatched sensor"
-            )
-        samples = payload.get("samples")
-        if (
-            not isinstance(samples, Sequence)
-            or isinstance(samples, (str, bytes, bytearray))
-            or not samples
-        ):
-            raise HistoricalMetricsSourceError(
-                "synthetic metrics source returned no samples"
-            )
         return payload
 
     @staticmethod

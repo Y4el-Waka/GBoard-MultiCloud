@@ -130,6 +130,39 @@ class SyntheticMetricsProviderTests(unittest.TestCase):
         self.assertEqual(result["sensor_id"], 100001)
         self.assertTrue(response.closed)
 
+    def test_sensor_metadata_uses_explicit_source_type_without_credentials(self) -> None:
+        response = FakeResponse(
+            {
+                "server_id": "srv-prtg-01",
+                "objid": 100001,
+                "sensor_type": "traffic",
+            }
+        )
+        request_get = RecordingGet(response)
+
+        result = self.provider(request_get).fetch_sensor_metadata(
+            self.server,
+            100001,
+        )
+
+        url, options = request_get.calls[0]
+        self.assertEqual(
+            url,
+            "http://127.0.0.1:19090/prtg-01/api/multichannel.json",
+        )
+        self.assertEqual(options["params"], {"id": "100001"})
+        self.assertEqual(
+            result,
+            {
+                "server_id": "srv-prtg-01",
+                "sensor_id": "100001",
+                "sensor_type": "traffic",
+            },
+        )
+        self.assertNotIn("username", options["params"])
+        self.assertNotIn("password", options["params"])
+        self.assertNotIn("passhash", options["params"])
+
     def test_default_transport_ignores_environment_proxy_settings(self) -> None:
         response = FakeResponse(source_payload(["2026-09-23T12:00:00Z"]))
         session = mock.MagicMock()
@@ -523,6 +556,22 @@ class SyntheticMetricsHTTPIntegrationTests(unittest.TestCase):
             traffic["traffic_in_bps"]["samples"],
             traffic["traffic_out_bps"]["samples"],
         )
+
+    def test_real_http_metadata_resolves_every_metric_family(self) -> None:
+        self.login()
+        for family in ("ping", "cpu", "memory", "traffic", "sfp"):
+            with self.subTest(family=family):
+                response = self.client.get(
+                    "/api/v2/metrics/sensor-metadata",
+                    query_string={
+                        "server": "PRTG LAB 01",
+                        "sensor_id": self.sensor_id(family),
+                    },
+                )
+                self.assertEqual(response.status_code, 200)
+                sensor = response.get_json()["sensor"]
+                self.assertEqual(sensor["server_id"], "srv-lab-http-01")
+                self.assertEqual(sensor["sensor_type"], family)
 
     def test_real_http_range_mode_returns_only_requested_ticks(self) -> None:
         self.login()

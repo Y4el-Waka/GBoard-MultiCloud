@@ -2333,6 +2333,118 @@ textarea::placeholder {
   }
 }
 
+/* Phase 0.3F.2: additive historical metrics states and unit-safe charts. */
+.history-modal-panel {
+  max-height: 94vh;
+  overflow-y: auto;
+}
+
+.history-mode-badge,
+.history-state,
+.history-diagnostics {
+  margin-bottom: 12px;
+  border-radius: 9px;
+  padding: 9px 12px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.history-mode-badge.hidden,
+.history-state.hidden,
+.history-diagnostics.hidden {
+  display: none;
+}
+
+.history-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  background: rgba(14, 165, 233, 0.1);
+  color: #7dd3fc;
+  font-weight: 700;
+}
+
+.history-mode-badge.is-legacy {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: rgba(245, 158, 11, 0.1);
+  color: #fcd34d;
+}
+
+.history-state {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(15, 23, 42, 0.38);
+  color: #cbd5e1;
+}
+
+.history-state.is-loading::before {
+  content: '';
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  margin-right: 8px;
+  border: 2px solid rgba(125, 211, 252, 0.3);
+  border-top-color: #7dd3fc;
+  border-radius: 999px;
+  vertical-align: -1px;
+  animation: history-spin 0.8s linear infinite;
+}
+
+.history-diagnostics {
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  background: rgba(245, 158, 11, 0.08);
+  color: #fde68a;
+}
+
+.history-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.history-chart-panel {
+  min-width: 0;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 12px;
+  background: rgba(9, 9, 11, 0.28);
+  padding: 12px;
+}
+
+.history-chart-panel-legacy,
+.history-chart-panel:only-child {
+  grid-column: 1 / -1;
+}
+
+.history-chart-heading {
+  margin: 0 0 8px;
+  color: #e4e4e7;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.history-chart-canvas {
+  position: relative;
+  height: 300px;
+}
+
+.history-chart-panel-legacy .history-chart-canvas {
+  height: 420px;
+}
+
+@keyframes history-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 800px) {
+  .history-chart-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .history-chart-panel {
+    grid-column: 1;
+  }
+}
+
 
 /* =========================================================
    HOTFIX 2026-07-30

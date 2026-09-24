@@ -15,6 +15,32 @@ The endpoint uses the existing CoreView session authentication. Requests
 without a valid session receive the same `401` response used by the existing
 monitoring APIs. API keys are not supported in this phase.
 
+### Sensor metadata resolver
+
+The experimental frontend resolves the canonical family without inspecting
+mutable sensor names:
+
+```http
+GET /api/v2/metrics/sensor-metadata?server=PRTG%20LAB%2001&sensor_id=100001
+```
+
+The authenticated response contains only allowlisted identity metadata:
+
+```json
+{
+  "schema_version": "2.0",
+  "sensor": {
+    "server_id": "srv-prtg-01",
+    "sensor_id": "100001",
+    "sensor_type": "traffic"
+  }
+}
+```
+
+It uses the same `400`, `401`, `404`, `502`, and `500` error principles as the
+history endpoint. It never exposes configured credentials, source URLs, raw
+provider payloads, or stack traces.
+
 ## Query parameters
 
 All requests require:
@@ -206,6 +232,9 @@ laboratory source during normal CoreView startup. The default is `disabled`;
 with no injected provider, this endpoint returns `502` while legacy features
 keep working. See `docs/LAB_METRICS_PROVIDER.md` for a complete smoke test.
 
+Set `COREVIEW_METRICS_UI_ENABLED=true` separately to let the dashboard consume
+v2. Its default is `false`; provider activation alone does not alter the UI.
+
 ## Current limitations
 
 - Only the synthetic localhost provider is implemented; a real PRTG-backed
@@ -214,6 +243,7 @@ keep working. See `docs/LAB_METRICS_PROVIDER.md` for a complete smoke test.
   error when the requested interval contains no real logical sample.
 - There is no normalized cache. The legacy cache is unchanged and separate.
 - Counter-to-rate, aggregation, resampling, and normalized storage are absent.
-- The dashboard does not call this endpoint.
+- The dashboard integration is feature-flagged and requests a fixed 24 source
+  points; a richer range selector is deferred.
 - Request-side `server` lookup still uses the configured name; response
   identity always uses the configured stable `server_id`.

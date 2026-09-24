@@ -14,6 +14,7 @@ Set the following in the untracked `.env`:
 
 ```dotenv
 COREVIEW_METRICS_PROVIDER=synthetic
+COREVIEW_METRICS_UI_ENABLED=true
 APP_SECRET_KEY=replace-with-a-local-development-secret
 ```
 
@@ -193,3 +194,29 @@ rm /tmp/coreview-lab.cookies
 
 Do not commit `.env`, `servers.json`, runtime databases, generated snapshot,
 logs, or cookie files.
+
+## Visual validation checklist
+
+With `COREVIEW_METRICS_UI_ENABLED=true`, open the authenticated dashboard and
+use the history button on IDs discovered in step 5:
+
+The multichannel laboratory overlay is assigned by stable sensor ID and is
+intentionally independent from mutable legacy card labels. Confirm the
+canonical `sensor_type` shown in the modal subtitle; do not select a family by
+matching text such as `CPU` or `Traffic` in the legacy sensor name.
+
+- Ping shows separate latency and percentage charts.
+- CPU shows `cpu_usage_pct`, not Ping data.
+- Memory separates utilization from formatted byte values.
+- Traffic shows independent IN and OUT series plus utilization when present.
+- A full SFP sensor separates optical power, temperature, voltage, and bias.
+- A partial SFP sensor shows only available channels and a partial-data notice.
+- Rapidly switch sensors; no chart from the earlier sensor may appear.
+- Close and reopen the modal; Chart.js must not report a reused-canvas error.
+- Stop the simulator; the modal must identify controlled legacy fallback.
+
+Then set `COREVIEW_METRICS_UI_ENABLED=false`, restart CoreView, and confirm the
+same buttons use `/api/history` only and display the `Histórico legacy` badge.
+Browser developer tools should show no v2 request while the flag is disabled.
+
+All captures must use only this synthetic laboratory dataset.

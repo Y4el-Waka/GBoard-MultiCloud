@@ -1617,6 +1617,7 @@ def create_app(
             "dashboard_prtg.html",
             usuario=session.get("username", ""),
             rol=session.get("rol", "lector"),
+            metrics_ui_enabled=APP_SETTINGS.metrics_ui_enabled,
         )
 
     @app.route("/api/me")
@@ -1908,6 +1909,68 @@ def create_app(
 
         except HistoryUpstreamError:
             return jsonify({"error": "No se pudo consultar PRTG"}), 502
+
+    @app.get("/api/v2/metrics/sensor-metadata")
+    @login_required
+    def api_metrics_sensor_metadata_v2():
+        server = request.args.get("server", "").strip()
+        sensor_id = request.args.get("sensor_id", "").strip()
+        if not server or not sensor_id:
+            return jsonify(
+                {
+                    "error": "server y sensor_id son obligatorios",
+                    "code": "invalid_request",
+                }
+            ), 400
+
+        try:
+            metadata = app.history_service.get_normalized_sensor_metadata(  # type: ignore[attr-defined]
+                server,
+                sensor_id,
+            )
+            return jsonify(
+                {
+                    "schema_version": "2.0",
+                    "sensor": {
+                        "server_id": metadata.identity.server_id,
+                        "sensor_id": metadata.identity.sensor_id,
+                        "sensor_type": metadata.sensor_type,
+                    },
+                }
+            )
+        except HistoryServerNotFoundError:
+            return jsonify(
+                {"error": "Servidor no encontrado", "code": "server_not_found"}
+            ), 404
+        except HistorySensorNotFoundError:
+            return jsonify(
+                {"error": "Sensor no encontrado", "code": "sensor_not_found"}
+            ), 404
+        except HistoryValidationError:
+            return jsonify(
+                {
+                    "error": "Solicitud de metadata invalida",
+                    "code": "invalid_request",
+                }
+            ), 400
+        except HistoryUpstreamError:
+            return jsonify(
+                {
+                    "error": "No se pudo consultar metadata de metricas",
+                    "code": "upstream_error",
+                }
+            ), 502
+        except Exception as exc:
+            app.logger.error(
+                "Error inesperado en metrics metadata v2 error_type=%s",
+                type(exc).__name__,
+            )
+            return jsonify(
+                {
+                    "error": "Error interno consultando metadata de metricas",
+                    "code": "internal_error",
+                }
+            ), 500
 
     @app.get("/api/v2/metrics/history")
     @login_required

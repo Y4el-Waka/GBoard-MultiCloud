@@ -37,7 +37,7 @@
 
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.css">
-  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}?v=20260920-mf2">
+  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}?v=20260924-metrics1">
 
 
   <!-- MF visual override: alerta sutil en toda la tarjeta, sin recuadro interno -->
@@ -179,7 +179,8 @@
 
 <body class="bg-gray-50 text-gray-800 min-h-screen"
       data-user-role="{{ rol|default('lector') }}"
-      data-username="{{ usuario|default('') }}">
+      data-username="{{ usuario|default('') }}"
+      data-metrics-ui-enabled="{{ 'true' if metrics_ui_enabled|default(false) else 'false' }}">
 
   <!-- Topbar -->
  <div id="welcome-bar" class="welcome-bar">
@@ -533,7 +534,7 @@
 
   <!-- Modal histórico -->
   <div id="history-modal" class="modal-backdrop fixed inset-0 hidden items-center justify-center bg-black/60 p-4 z-50">
-    <div class="modal-panel bg-white dark:bg-[#161B22] rounded-xl shadow-2xl w-full max-w-3xl p-5">
+    <div class="modal-panel history-modal-panel bg-white dark:bg-[#161B22] rounded-xl shadow-2xl w-full max-w-5xl p-5">
       <div class="flex justify-between items-start gap-4 mb-4">
         <div>
           <h3 id="history-title" class="text-lg font-semibold text-gray-800 dark:text-gray-100">Histórico</h3>
@@ -545,10 +546,17 @@
         </button>
       </div>
 
-      <div id="history-error" class="hidden text-sm text-red-600 mb-3"></div>
-      <div class="relative h-[420px]">
-        <canvas id="historyChart"></canvas>
-        </div>
+      <div id="history-mode" class="history-mode-badge hidden" aria-live="polite"></div>
+      <div id="history-state" class="history-state hidden" role="status" aria-live="polite"></div>
+      <div id="history-diagnostics" class="history-diagnostics hidden" aria-live="polite"></div>
+      <div id="history-error" class="hidden text-sm text-red-600 mb-3" role="alert"></div>
+      <div id="history-chart-grid" class="history-chart-grid">
+        <section id="history-legacy-panel" class="history-chart-panel history-chart-panel-legacy">
+          <div class="history-chart-canvas">
+            <canvas id="historyChart"></canvas>
+          </div>
+        </section>
+      </div>
         <div class="history-footer mt-5 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
   <div class="text-xs text-gray-500">
     <i class="fa-solid fa-circle-info mr-1"></i>
@@ -1088,8 +1096,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
-  
-
-  <script src="{{ url_for('static', filename='dashboard.js') }}?v=20260920-mf3"></script>
+  <script src="{{ url_for('static', filename='metrics-history.js') }}?v=20260924-metrics1"></script>
+  <script src="{{ url_for('static', filename='dashboard.js') }}?v=20260924-metrics1"></script>
 </body>
 </html>
