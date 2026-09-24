@@ -144,13 +144,44 @@ synthetic profiles + logical tick
           MetricSample[]
 ```
 
+## Phase 0.3D: Normalized history integration
+
+Implemented scope:
+
+- additive HistoryService.get_normalized_history() API;
+- minimal injected HistoricalMetricsSource provider boundary;
+- real use of PRTGMetricAdapter across multiple source timestamps;
+- immutable NormalizedHistoryResult with stable identity, samples, available
+  channel definitions, unknown channels, issues, and observed bounds;
+- on-demand grouping by canonical channel_key;
+- chronological ordering and deterministic last-source-wins deduplication for
+  equal timestamp/channel pairs;
+- aware UTC query boundaries and samples;
+- semantic Ping parity tests against the unchanged legacy parser;
+- normalized CPU, memory, traffic, and SFP integration using the synthetic
+  multichannel source;
+- no normalized cache in this increment.
+
+The dual path is now:
+
+~~~text
+PRTG CSV -> legacy parser -> legacy cache/datasets -> /api/history -> current UI
+
+HistoricalMetricsSource
+          |
+PRTGMetricAdapter
+          |
+NormalizedHistoryResult
+  samples / channels / issues / unknowns
+          |
+ direct backend use and tests only
+~~~
+
+The legacy parser, cache, public route, frontend, collector, snapshot, and
+SQLite remain unchanged. Availability is retained by the normalized path but
+is not inferred from legacy Coverage.
+
 ## Remaining planned incremental phases
-
-### 0.3D - HistoryService integration
-
-Introduce normalized historic samples behind `HistoryService` while preserving
-the current Ping response through a compatibility adapter. Do not remove the
-legacy parser until parity is measured and regression-tested.
 
 ### 0.3E - Metrics API compatibility
 
@@ -164,17 +195,17 @@ Add multichannel visualization only after backend contracts are stable. Select
 channels and axes by metadata rather than sensor-name conditions, and retain the
 current dashboard until equivalent behavior is verified.
 
-## Entry criteria for Phase 0.3D
+## Entry criteria for Phase 0.3E
 
-- Phase 0.3A through 0.3C remain green with the complete regression suite.
-- Normalized history is introduced behind `HistoryService`, not inside
-  `PRTGClient` or Flask routes.
-- The existing Ping datasets remain available through an explicit compatibility
-  path until parity is proven.
-- New history tests use the multichannel simulator and adapter without changing
-  the legacy Ping CSV contract.
-- Stable sensor identity and timezone behavior are preserved across source,
-  normalization, caching, and compatibility output.
+- Phase 0.3A through 0.3D remain green with the complete regression suite.
+- The new API is additive or explicitly versioned; /api/history remains
+  unchanged.
+- Serialization rules preserve numeric values, canonical units, aware UTC
+  timestamps, stable identity, issues, and unknown channels.
+- Provider/query semantics and a separate cache namespace are decided before
+  exposing normalized history publicly.
+- Authorization and source lookup reuse current application boundaries without
+  moving presentation behavior into HistoryService.
 
 ## Migration principles
 

@@ -5,10 +5,20 @@ import io
 import logging
 import re
 from collections import OrderedDict
-from datetime import UTC, datetime, timedelta
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta, tzinfo
 from threading import RLock
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Protocol
 
+from metrics.definitions import get_sensor_definition
+from metrics.models import MetricChannelDefinition, MetricSample, SensorIdentity
+from metrics.prtg_adapter import (
+    AdapterIssue,
+    PRTGAdapterError,
+    PRTGMetricAdapter,
+    UnknownChannel,
+)
 from prtg_client import PRTGClient, PRTGClientError
 
 
@@ -28,11 +38,62 @@ class HistoryUpstreamError(HistoryServiceError):
     """The upstream PRTG-compatible API could not be queried."""
 
 
+class HistorySensorNotFoundError(HistoryServiceError):
+    """The requested sensor does not exist in the normalized source."""
+
+
+class HistoricalMetricsSourceError(Exception):
+    """A normalized-history source failed before adaptation."""
+
+
+class HistoricalMetricsSensorNotFoundError(HistoricalMetricsSourceError):
+    """A normalized-history source could not locate the requested sensor."""
+
+
 ServerMap = Mapping[str, Mapping[str, Any]]
 ServerProvider = Callable[[], ServerMap]
 ClientFactory = Callable[[], PRTGClient]
 Clock = Callable[[], datetime]
 CacheKey = str
+
+
+class HistoricalMetricsSource(Protocol):
+    """Minimal provider boundary for PRTG-shaped multichannel history."""
+
+    def fetch_history(
+        self,
+        server: Mapping[str, Any],
+        sensor_id: int | str,
+        *,
+        points: int,
+        start: datetime | None,
+        end: datetime | None,
+    ) -> Mapping[str, Any]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizedHistoryResult:
+    """Provider-neutral history result with no presentation serialization."""
+
+    identity: SensorIdentity
+    sensor_type: str
+    samples: tuple[MetricSample, ...]
+    channels: tuple[MetricChannelDefinition, ...]
+    unknown_channels: tuple[UnknownChannel, ...]
+    issues: tuple[AdapterIssue, ...]
+    start: datetime | None
+    end: datetime | None
+
+    def by_channel(self) -> dict[str, tuple[MetricSample, ...]]:
+        """Group samples on demand without storing a duplicate series index."""
+        grouped: dict[str, list[MetricSample]] = {}
+        for sample in self.samples:
+            grouped.setdefault(sample.channel_key, []).append(sample)
+        return {
+            channel.key: tuple(grouped[channel.key])
+            for channel in self.channels
+            if channel.key in grouped
+        }
 
 
 def _utcnow_naive() -> datetime:
@@ -58,6 +119,8 @@ class HistoryService:
         logger: logging.Logger | None = None,
         clock: Clock = _utcnow_naive,
         range_clock: Clock = datetime.now,
+        normalized_source: HistoricalMetricsSource | None = None,
+        metric_adapter: PRTGMetricAdapter | None = None,
     ) -> None:
         self._server_provider = server_provider
         self._server_reloader = server_reloader
@@ -67,6 +130,10 @@ class HistoryService:
         self._logger = logger or logging.getLogger(__name__)
         self._clock = clock
         self._range_clock = range_clock
+        self._normalized_source = normalized_source
+        self._metric_adapter = metric_adapter or (
+            PRTGMetricAdapter() if normalized_source is not None else None
+        )
         self._cache: OrderedDict[
             CacheKey,
             tuple[datetime, dict[str, Any]],
@@ -142,6 +209,176 @@ class HistoryService:
         self._cache_set(cache_key, payload)
         return payload
 
+    def get_normalized_history(
+        self,
+        server_identifier: str,
+        sensor_id: int | str,
+        *,
+        sensor_type: str,
+        points: int = 12,
+        source_timezone: tzinfo | None = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
+    ) -> NormalizedHistoryResult:
+        """Return canonical samples through the opt-in multichannel path.
+
+        This path intentionally has no cache in Phase 0.3D. The existing
+        legacy parser and cache remain the only behavior used by Flask.
+        """
+        identifier = str(server_identifier or "").strip()
+        sensor_text = str(sensor_id or "").strip()
+        selected_type = str(sensor_type or "").strip().casefold()
+
+        if not identifier or not sensor_text:
+            raise HistoryValidationError("server identifier e id son obligatorios")
+        if isinstance(sensor_id, bool):
+            raise HistoryValidationError("sensor_id debe ser un identificador valido")
+        if (
+            isinstance(points, bool)
+            or not isinstance(points, int)
+            or not 1 <= points <= 10_000
+        ):
+            raise HistoryValidationError("points debe estar entre 1 y 10000")
+
+        try:
+            sensor_definition = get_sensor_definition(selected_type)
+        except KeyError:
+            raise HistoryValidationError(
+                f"tipo de sensor normalizado no soportado: {sensor_type!r}"
+            ) from None
+
+        normalized_start = self._normalize_boundary(start, "start")
+        normalized_end = self._normalize_boundary(end, "end")
+        if (
+            normalized_start is not None
+            and normalized_end is not None
+            and normalized_start > normalized_end
+        ):
+            raise HistoryValidationError("start no puede ser posterior a end")
+
+        if self._normalized_source is None or self._metric_adapter is None:
+            raise HistoryValidationError(
+                "la fuente de historico normalizado no esta configurada"
+            )
+
+        server = self._lookup_server(identifier)
+        server_id = str(server.get("id") or "").strip()
+        if not server_id:
+            raise HistoryValidationError(
+                "el servidor requiere un id estable para historico normalizado"
+            )
+
+        try:
+            payload = self._normalized_source.fetch_history(
+                server,
+                sensor_id,
+                points=points,
+                start=normalized_start,
+                end=normalized_end,
+            )
+        except HistoricalMetricsSensorNotFoundError:
+            raise HistorySensorNotFoundError(
+                f"Sensor '{sensor_text}' no encontrado"
+            ) from None
+        except (HistoricalMetricsSourceError, PRTGClientError) as exc:
+            self._logger.warning(
+                "Error consultando historico normalizado "
+                "server=%s sensor=%s source_error=%s",
+                identifier,
+                sensor_text,
+                type(exc).__name__,
+            )
+            raise HistoryUpstreamError(
+                "No se pudo consultar la fuente historica normalizada"
+            ) from None
+
+        if not isinstance(payload, Mapping):
+            raise HistoryUpstreamError(
+                "La fuente historica normalizada devolvio un payload invalido"
+            )
+
+        source_samples = payload.get("samples")
+        if (
+            not isinstance(source_samples, Sequence)
+            or isinstance(source_samples, (str, bytes, bytearray))
+            or not source_samples
+        ):
+            raise HistoryUpstreamError(
+                "La fuente historica normalizada no devolvio muestras"
+            )
+
+        expected_identity = SensorIdentity(
+            server_id=server_id,
+            sensor_id=sensor_text,
+        )
+        adapted_identity: SensorIdentity | None = None
+        collected_samples: list[MetricSample] = []
+        unknown_channels: list[UnknownChannel] = []
+        issues: list[AdapterIssue] = []
+
+        for source_sample in source_samples:
+            try:
+                adapted = self._metric_adapter.adapt_sensor(
+                    source_sample,
+                    server_id=server_id,
+                    sensor_type=selected_type,
+                    source_timezone=source_timezone,
+                )
+            except PRTGAdapterError as exc:
+                self._logger.warning(
+                    "Fuente historica normalizada invalida "
+                    "server=%s sensor=%s adapter_error=%s",
+                    identifier,
+                    sensor_text,
+                    type(exc).__name__,
+                )
+                raise HistoryUpstreamError(
+                    "No se pudo normalizar la fuente historica"
+                ) from None
+
+            if adapted.identity != expected_identity:
+                raise HistoryUpstreamError(
+                    "La identidad del historico normalizado no coincide "
+                    "con la solicitud"
+                )
+            if adapted_identity is None:
+                adapted_identity = adapted.identity
+            collected_samples.extend(adapted.samples)
+            unknown_channels.extend(adapted.unknown_channels)
+            issues.extend(adapted.issues)
+
+        # Provider order is authoritative: for a duplicate timestamp/channel,
+        # the last observation replaces earlier values deterministically.
+        deduplicated: dict[tuple[datetime, str], MetricSample] = {}
+        for sample in collected_samples:
+            deduplicated[(sample.timestamp, sample.channel_key)] = sample
+        ordered_samples = tuple(
+            sorted(
+                deduplicated.values(),
+                key=lambda sample: (sample.timestamp, sample.channel_key),
+            )
+        )
+
+        present_keys = {sample.channel_key for sample in ordered_samples}
+        channels = tuple(
+            channel
+            for channel in sensor_definition.channels
+            if channel.key in present_keys
+        )
+        result_start = ordered_samples[0].timestamp if ordered_samples else None
+        result_end = ordered_samples[-1].timestamp if ordered_samples else None
+
+        return NormalizedHistoryResult(
+            identity=adapted_identity or expected_identity,
+            sensor_type=selected_type,
+            samples=ordered_samples,
+            channels=channels,
+            unknown_channels=tuple(unknown_channels),
+            issues=tuple(issues),
+            start=result_start,
+            end=result_end,
+        )
+
     def clear(self) -> None:
         """Invalidate every cached historic response."""
         with self._cache_lock:
@@ -214,6 +451,21 @@ class HistoryService:
             raise HistoryValidationError(
                 "avg debe estar entre 60 y 3600"
             )
+
+    @staticmethod
+    def _normalize_boundary(
+        value: datetime | None,
+        field_name: str,
+    ) -> datetime | None:
+        if value is None:
+            return None
+        if not isinstance(value, datetime):
+            raise HistoryValidationError(f"{field_name} debe ser datetime")
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise HistoryValidationError(
+                f"{field_name} debe incluir timezone"
+            )
+        return value.astimezone(UTC)
 
     def _cache_get(self, key: CacheKey) -> dict[str, Any] | None:
         now = self._clock()

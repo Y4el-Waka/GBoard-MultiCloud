@@ -545,8 +545,8 @@ class PRTGMetricsAdapterTests(unittest.TestCase):
                 sensor_type="ping",
             )
 
-    def test_existing_production_modules_do_not_import_adapter(self) -> None:
-        offenders = []
+    def test_only_history_service_imports_adapter_in_production(self) -> None:
+        consumers = []
         for relative_name in PRODUCTION_FILES:
             tree = ast.parse((ROOT / relative_name).read_text(encoding="utf-8"))
             for node in ast.walk(tree):
@@ -557,9 +557,9 @@ class PRTGMetricsAdapterTests(unittest.TestCase):
                 else:
                     continue
                 if any(name.startswith("metrics.prtg_adapter") for name in names):
-                    offenders.append(relative_name)
+                    consumers.append(relative_name)
 
-        self.assertEqual(offenders, [])
+        self.assertEqual(consumers, ["history_service.py"])
 
 
 if __name__ == "__main__":
