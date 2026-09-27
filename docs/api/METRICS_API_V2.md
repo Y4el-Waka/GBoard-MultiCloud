@@ -30,7 +30,7 @@ The authenticated response contains only allowlisted identity metadata:
 {
   "schema_version": "2.0",
   "sensor": {
-    "server_id": "srv-prtg-01",
+    "server_id": "srv_lab_01",
     "sensor_id": "100001",
     "sensor_type": "traffic"
   }
@@ -93,7 +93,7 @@ Error codes are `invalid_request`, `server_not_found`,
 {
   "schema_version": "2.0",
   "sensor": {
-    "server_id": "srv-prtg-01",
+    "server_id": "srv_lab_01",
     "sensor_id": "100001",
     "sensor_type": "traffic"
   },

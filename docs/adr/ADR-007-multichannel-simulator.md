@@ -39,8 +39,10 @@ fully built.
 
 ### Deterministic family assignment and seed
 
-Legacy sensor IDs are reused as provider `objid` values. A fixed family cycle
-assigns the 1,000 default sensors as:
+Legacy sensor IDs are reused as provider `objid` values. As amended by
+ADR-012, one shared synthetic catalog assigns the family, legacy display name,
+and primary source channel before either representation is built. A fixed
+ten-entry catalog pattern assigns the 1,000 default sensors as:
 
 - 400 Ping;
 - 200 CPU;
@@ -48,11 +50,12 @@ assigns the 1,000 default sensors as:
 - 200 traffic;
 - 100 SFP.
 
-Assignment is independent from mutable sensor names. Profiles use a SHA-256
-derived seed based on simulator seed, server slug, and sensor ID. This creates a
-private PRNG per profile and does not consume the legacy simulator's PRNG.
-Consequently, enabling multichannel data does not shift existing IDs, statuses,
-or `lastvalue` generation.
+Legacy cards derive their names and initial `lastvalue` from that same catalog;
+multichannel profiles look up the catalog by `(server_id, sensor_id)` and never
+run a second family algorithm. Profiles use a SHA-256 derived seed based on
+simulator seed, server slug, and sensor ID. This creates a private PRNG per
+profile. The legacy initial value is selected from the profile's declared
+primary channel at logical tick zero, avoiding independently randomized values.
 
 The seed remains available through the existing constructor and CLI argument.
 `SIMULATOR_SEED` supplies the default when explicitly configured. Identical
@@ -179,6 +182,7 @@ already-normalized data.
 Positive consequences:
 
 - The legacy 13-server/1,000-sensor collector path remains unchanged.
+- Legacy names/values and normalized histories now share one family catalog.
 - Every required sensor family has deterministic, evolving PRTG-like channels.
 - Tests can advance time and scenarios instantly without sleeps.
 - Partial, unknown, invalid-value, unknown-unit, and invalid-timestamp cases are

@@ -58,7 +58,7 @@ class PRTGIntegrationContractTests(unittest.TestCase):
         )
         servers = [
             {
-                "id": f"srv-{slug}",
+                "id": simulated.server_id,
                 "type": "prtg",
                 "enabled": True,
                 "name": simulated.name,

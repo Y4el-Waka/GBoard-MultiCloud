@@ -200,10 +200,9 @@ logs, or cookie files.
 With `COREVIEW_METRICS_UI_ENABLED=true`, open the authenticated dashboard and
 use the history button on IDs discovered in step 5:
 
-The multichannel laboratory overlay is assigned by stable sensor ID and is
-intentionally independent from mutable legacy card labels. Confirm the
-canonical `sensor_type` shown in the modal subtitle; do not select a family by
-matching text such as `CPU` or `Traffic` in the legacy sensor name.
+The synthetic catalog aligns each legacy card label with the canonical
+`sensor_type` shown in the modal subtitle. The UI still resolves the type from
+metadata, never by matching text such as `CPU` or `Traffic` in the name.
 
 - Ping shows separate latency and percentage charts.
 - CPU shows `cpu_usage_pct`, not Ping data.

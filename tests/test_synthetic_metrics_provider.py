@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import importlib
+import importlib.util
 import json
 import os
 import socket
@@ -28,7 +29,7 @@ from synthetic_metrics_provider import SyntheticHistoricalMetricsSource
 
 def source_sample(timestamp: str, sensor_id: int = 100001) -> dict[str, Any]:
     return {
-        "server_id": "srv-prtg-01",
+        "server_id": "srv_lab_01",
         "sensor_type": "ping",
         "objid": sensor_id,
         "timestamp": timestamp,
@@ -44,7 +45,7 @@ def source_payload(
 ) -> dict[str, Any]:
     return {
         "synthetic": True,
-        "server_id": "srv-prtg-01",
+        "server_id": "srv_lab_01",
         "server_name": "PRTG LAB 01",
         "sensor_id": sensor_id,
         "sensor_type": "ping",
@@ -84,7 +85,7 @@ class RecordingGet:
 class SyntheticMetricsProviderTests(unittest.TestCase):
     def setUp(self) -> None:
         self.server = {
-            "id": "srv-lab-01",
+            "id": "srv_lab_01",
             "name": "PRTG LAB 01",
             "url": "http://127.0.0.1:19090/prtg-01",
             "username": "synthetic-user",
@@ -133,7 +134,7 @@ class SyntheticMetricsProviderTests(unittest.TestCase):
     def test_sensor_metadata_uses_explicit_source_type_without_credentials(self) -> None:
         response = FakeResponse(
             {
-                "server_id": "srv-prtg-01",
+                "server_id": "srv_lab_01",
                 "objid": 100001,
                 "sensor_type": "traffic",
             }
@@ -154,7 +155,7 @@ class SyntheticMetricsProviderTests(unittest.TestCase):
         self.assertEqual(
             result,
             {
-                "server_id": "srv-prtg-01",
+                "server_id": "srv_lab_01",
                 "sensor_id": "100001",
                 "sensor_type": "traffic",
             },
@@ -162,6 +163,40 @@ class SyntheticMetricsProviderTests(unittest.TestCase):
         self.assertNotIn("username", options["params"])
         self.assertNotIn("password", options["params"])
         self.assertNotIn("passhash", options["params"])
+
+    def test_provider_rejects_cross_server_source_identity(self) -> None:
+        mismatched_history = source_payload(["2026-09-23T12:00:00Z"])
+        mismatched_history["server_id"] = "srv_lab_02"
+        history_get = RecordingGet(FakeResponse(mismatched_history))
+        with self.assertRaisesRegex(
+            HistoricalMetricsSourceError,
+            "mismatched server",
+        ):
+            self.provider(history_get).fetch_history(
+                self.server,
+                100001,
+                points=1,
+                start=None,
+                end=None,
+            )
+
+        metadata_get = RecordingGet(
+            FakeResponse(
+                {
+                    "server_id": "srv_lab_02",
+                    "objid": 100001,
+                    "sensor_type": "ping",
+                }
+            )
+        )
+        with self.assertRaisesRegex(
+            HistoricalMetricsSourceError,
+            "mismatched metadata",
+        ):
+            self.provider(metadata_get).fetch_sensor_metadata(
+                self.server,
+                100001,
+            )
 
     def test_default_transport_ignores_environment_proxy_settings(self) -> None:
         response = FakeResponse(source_payload(["2026-09-23T12:00:00Z"]))
@@ -401,7 +436,7 @@ class SyntheticMetricsHTTPIntegrationTests(unittest.TestCase):
         cls.http_thread.start()
 
         cls.server = {
-            "id": "srv-lab-http-01",
+            "id": "srv_lab_01",
             "type": "prtg",
             "enabled": True,
             "name": "PRTG LAB 01",
@@ -537,7 +572,7 @@ class SyntheticMetricsHTTPIntegrationTests(unittest.TestCase):
                 self.assertEqual(payload["schema_version"], "2.0")
                 self.assertEqual(
                     payload["sensor"]["server_id"],
-                    "srv-lab-http-01",
+                    "srv_lab_01",
                 )
                 self.assertEqual(set(payload["channels"]), channel_keys)
                 for channel in payload["channels"].values():
@@ -570,8 +605,81 @@ class SyntheticMetricsHTTPIntegrationTests(unittest.TestCase):
                 )
                 self.assertEqual(response.status_code, 200)
                 sensor = response.get_json()["sensor"]
-                self.assertEqual(sensor["server_id"], "srv-lab-http-01")
+                self.assertEqual(sensor["server_id"], "srv_lab_01")
                 self.assertEqual(sensor["sensor_type"], family)
+
+    def test_real_http_legacy_collector_snapshot_and_v2_history_agree(self) -> None:
+        monitor_path = Path(__file__).resolve().parents[1] / "monitor.py"
+        spec = importlib.util.spec_from_file_location(
+            "_synthetic_consistency_monitor",
+            monitor_path,
+        )
+        if spec is None or spec.loader is None:
+            self.fail("No se pudo cargar monitor.py para la prueba integrada")
+        monitor_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(monitor_module)
+
+        snapshot = monitor_module.PRTGMonitor([self.server]).fetch()
+        self.assertEqual(snapshot["collector"]["servers_configured"], 1)
+        self.assertEqual(snapshot["collector"]["servers_with_error"], 0)
+        self.assertEqual(len(snapshot["sensores"]), 100)
+        snapshot_by_id = {
+            int(sensor["sensor_id"]): sensor
+            for sensor in snapshot["sensores"]
+        }
+
+        self.login()
+        expected_channels = {
+            "ping": {"latency_ms", "packet_loss_pct", "availability_pct"},
+            "cpu": {"cpu_usage_pct"},
+            "memory": {"memory_usage_pct", "memory_used_bytes"},
+            "traffic": {
+                "traffic_in_bps",
+                "traffic_out_bps",
+                "utilization_pct",
+            },
+            "sfp": {
+                "rx_power_dbm",
+                "tx_power_dbm",
+                "temperature_c",
+                "voltage_v",
+                "bias_current_ma",
+            },
+        }
+
+        for family, allowed_channels in expected_channels.items():
+            with self.subTest(family=family):
+                sensor_id = self.sensor_id(family)
+                entry = self.simulator.catalog.get("srv_lab_01", sensor_id)
+                legacy = self.simulator.servers["prtg-01"].sensors[sensor_id]
+                collected = snapshot_by_id[sensor_id]
+                self.assertEqual(entry.family, family)
+                self.assertEqual(collected["sensor"], legacy.name)
+                self.assertEqual(collected["lastvalue"], legacy.lastvalue)
+
+                metadata_response = self.client.get(
+                    "/api/v2/metrics/sensor-metadata",
+                    query_string={
+                        "server": "PRTG LAB 01",
+                        "sensor_id": sensor_id,
+                    },
+                )
+                self.assertEqual(metadata_response.status_code, 200)
+                metadata = metadata_response.get_json()["sensor"]
+                self.assertEqual(
+                    (metadata["server_id"], metadata["sensor_id"]),
+                    ("srv_lab_01", str(sensor_id)),
+                )
+                self.assertEqual(metadata["sensor_type"], family)
+
+                history_response = self.query(family, points=3)
+                self.assertEqual(history_response.status_code, 200)
+                history = history_response.get_json()
+                self.assertEqual(history["sensor"], metadata)
+                self.assertTrue(set(history["channels"]))
+                self.assertTrue(
+                    set(history["channels"]).issubset(allowed_channels)
+                )
 
     def test_real_http_range_mode_returns_only_requested_ticks(self) -> None:
         self.login()

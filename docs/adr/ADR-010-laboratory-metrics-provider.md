@@ -70,6 +70,12 @@ traffic and no mutable Session is shared between Flask threads. Transport
 exceptions are translated to sanitized
 `HistoricalMetricsSourceError` values.
 
+As amended by ADR-012, current, metadata, and historical responses must carry
+the same configured `server_id` as the selected laboratory server. A mismatch
+is rejected as a sanitized source error rather than being silently rebound to
+the requested server. This keeps equal numeric sensor IDs isolated by their
+composite `(server_id, sensor_id)` identity.
+
 ### Points contract
 
 Points mode maps directly to the simulator endpoint. Values from 1 through

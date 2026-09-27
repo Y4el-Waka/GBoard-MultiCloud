@@ -51,13 +51,10 @@ provider obtains those fields from the existing localhost-only
 The source method returns only allowlisted identity/type fields. PRTG-shaped
 channel names, credentials, URLs, and full source payloads are not exposed.
 
-The Phase 0.3C laboratory overlay deliberately assigns canonical families by
-stable sensor ID rather than by the mutable legacy card label. Consequently,
-the label on a legacy card is not evidence of its v2 family. The modal always
-shows the resolved canonical family in its subtitle, and laboratory operators
-must discover compatible IDs through the simulator inventory. Aligning legacy
-labels with normalized families would require a separate synthetic-topology
-migration and is not part of this frontend increment.
+ADR-012 later removed the independent legacy/overlay assignment. Both the
+legacy card and v2 metadata now consume one deterministic synthetic catalog.
+The frontend still trusts explicit metadata rather than parsing the aligned
+display name; alignment is a data-integrity property, not a UI heuristic.
 
 ### Frontend boundary
 
@@ -177,9 +174,8 @@ Tradeoffs and remaining work:
   intentionally uncached;
 - the metadata endpoint is experimental alongside the v2 history endpoint;
 - only the laboratory synthetic provider implements metadata acquisition;
-- Phase 0.3C's stable-ID overlay can expose a canonical family different from
-  a legacy card's mutable display label; the modal identifies the resolved v2
-  family explicitly;
+- the aligned naming guarantee applies only to the synthetic laboratory;
+  production providers must still supply explicit canonical metadata;
 - actual real-PRTG provider behavior, persistent multichannel storage,
   aggregation, and counter-to-rate remain outside Phase 0.3;
 - visual validation still depends on the browser/CDN availability used by the

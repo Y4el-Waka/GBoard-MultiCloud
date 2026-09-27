@@ -30,6 +30,11 @@ from typing import Any
 from flask import Flask, Response, abort, jsonify, request
 
 from simulator_multichannel import SyntheticMultichannelSimulator
+from synthetic_sensor_catalog import (
+    SyntheticSensorCatalog,
+    SyntheticSensorCatalogEntry,
+    sensor_kind_for_ordinal,
+)
 
 
 def _environment_int(name: str, default: int) -> int:
@@ -65,17 +70,6 @@ STATUS_WEIGHTS = [
     (9, 0.010),
 ]
 
-SENSOR_KINDS = [
-    "Ping",
-    "CPU Load",
-    "Memory",
-    "Traffic In",
-    "Traffic Out",
-    "HTTP",
-    "SNMP Uptime",
-    "Packet Loss",
-]
-
 DOCUMENTATION_NETS = [
     (192, 0, 2),       # TEST-NET-1
     (198, 51, 100),    # TEST-NET-2
@@ -88,13 +82,19 @@ class SensorState:
     objid: int
     parentid: int
     device: str
-    name: str
+    catalog_entry: SyntheticSensorCatalogEntry
+    is_mf: bool
     status_raw: int
     lastvalue: str
     message: str = "OK"
     pause_until: datetime | None = None
     pause_indefinite: bool = False
     previous_status: int = 3
+
+    @property
+    def name(self) -> str:
+        prefix = "MF-" if self.is_mf else ""
+        return f"{prefix}{self.catalog_entry.legacy_name}"
 
     def refresh_pause(self) -> None:
         if self.pause_indefinite:
@@ -121,6 +121,7 @@ class SensorState:
 @dataclass
 class SimulatedPRTG:
     slug: str
+    server_id: str
     name: str
     devices: dict[int, str] = field(default_factory=dict)
     device_names: dict[int, str] = field(default_factory=dict)
@@ -144,16 +145,19 @@ class Simulator:
         self.random = random.Random(seed)
         self.lock = threading.RLock()
         self.servers: dict[str, SimulatedPRTG] = {}
+        self.catalog = SyntheticSensorCatalog()
         self._build()
-        # Se construye después del dataset legacy y usa un PRNG derivado propio.
-        # Por eso no consume ni altera la secuencia aleatoria legacy.
+        # Legacy y multicanal consumen el mismo catálogo. El PRNG derivado sólo
+        # genera valores por perfil; nunca vuelve a decidir la familia.
         self.multichannel = SyntheticMultichannelSimulator(
             self.servers,
+            catalog=self.catalog,
             seed=seed,
             scenario=scenario,
             tick_seconds=tick_seconds,
             start_time=start_time,
         )
+        self._synchronize_legacy_lastvalues()
 
     def _weighted_status(self) -> int:
         pick = self.random.random()
@@ -172,23 +176,6 @@ class Simulator:
         host = (index % 254) + 1
         return f"{net[0]}.{net[1]}.{net[2]}.{host}"
 
-    def _lastvalue(self, kind: str, status: int) -> str:
-        if status in {5, 13, 14}:
-            return "Request timed out" if kind == "Ping" else "0"
-        if kind == "Ping":
-            return f"{self.random.randint(2, 75)} ms"
-        if kind == "CPU Load":
-            return f"{self.random.randint(8, 92)} %"
-        if kind == "Memory":
-            return f"{self.random.randint(20, 88)} %"
-        if "Traffic" in kind:
-            return f"{self.random.uniform(1, 950):.1f} Mbit/s"
-        if kind == "HTTP":
-            return f"{self.random.randint(80, 750)} ms"
-        if kind == "Packet Loss":
-            return f"{self.random.uniform(0, 4):.1f} %"
-        return f"{self.random.randint(1, 180)} d"
-
     def _build(self) -> None:
         per_server = [self.sensor_count // self.server_count] * self.server_count
         for i in range(self.sensor_count % self.server_count):
@@ -197,10 +184,16 @@ class Simulator:
         next_device_id = 10_000
         next_sensor_id = 100_000
         global_device_idx = 0
+        sensor_ordinal = 0
 
         for server_idx in range(1, self.server_count + 1):
             slug = f"prtg-{server_idx:02d}"
-            server = SimulatedPRTG(slug=slug, name=f"PRTG LAB {server_idx:02d}")
+            server_id = f"srv_lab_{server_idx:02d}"
+            server = SimulatedPRTG(
+                slug=slug,
+                server_id=server_id,
+                name=f"PRTG LAB {server_idx:02d}",
+            )
             target_sensors = per_server[server_idx - 1]
             device_count = max(5, math.ceil(target_sensors / 5))
 
@@ -215,30 +208,52 @@ class Simulator:
             device_ids = list(server.devices)
             for sensor_idx in range(target_sensors):
                 parent_id = device_ids[sensor_idx % len(device_ids)]
-                kind = SENSOR_KINDS[sensor_idx % len(SENSOR_KINDS)]
+                kind = sensor_kind_for_ordinal(sensor_ordinal)
+                catalog_entry = SyntheticSensorCatalogEntry(
+                    server_id=server_id,
+                    server_slug=slug,
+                    sensor_id=next_sensor_id,
+                    family=kind.family,
+                    legacy_name=kind.legacy_name,
+                    primary_source_channel=kind.primary_source_channel,
+                )
+                self.catalog.add(catalog_entry)
 
                 # Aproximadamente 1 de cada 40 sensores es MF para probar el SLA.
-                if sensor_idx % 40 == 0:
-                    kind = f"MF-{kind}"
+                is_mf = sensor_ordinal % 40 == 0
 
                 status = self._weighted_status()
-                if kind.startswith("MF-") and sensor_idx % 80 == 0:
+                if is_mf and sensor_ordinal % 80 == 0:
                     status = 5
 
                 sensor = SensorState(
                     objid=next_sensor_id,
                     parentid=parent_id,
                     device=server.device_names[parent_id],
-                    name=kind,
+                    catalog_entry=catalog_entry,
+                    is_mf=is_mf,
                     status_raw=status,
-                    lastvalue=self._lastvalue(kind.removeprefix("MF-"), status),
+                    lastvalue="",
                     message="Synthetic monitoring data",
                     previous_status=3,
                 )
                 server.sensors[next_sensor_id] = sensor
                 next_sensor_id += 1
+                sensor_ordinal += 1
 
             self.servers[slug] = server
+
+    def _synchronize_legacy_lastvalues(self) -> None:
+        """Use each catalog entry's primary multichannel source value."""
+        for slug, server in self.servers.items():
+            for sensor_id, sensor in server.sensors.items():
+                source = self.multichannel.sensor_source(slug, sensor_id, tick=0)
+                primary = sensor.catalog_entry.primary_source_channel
+                sensor.lastvalue = next(
+                    channel["value"]
+                    for channel in source["channels"]
+                    if channel.get("channel") == primary
+                )
 
     def server(self, slug: str) -> SimulatedPRTG:
         server = self.servers.get(slug)

@@ -9,19 +9,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-
-SENSOR_FAMILY_CYCLE = (
-    "ping",
-    "ping",
-    "ping",
-    "ping",
-    "cpu",
-    "cpu",
-    "memory",
-    "traffic",
-    "traffic",
-    "sfp",
-)
+from synthetic_sensor_catalog import SyntheticSensorCatalog
 
 SUPPORTED_SCENARIOS = frozenset(
     {
@@ -65,6 +53,7 @@ class MetricSensorProfile:
     parent_id: int
     device_name: str
     family: str
+    primary_source_channel: str
     phase: float
     parameters: Mapping[str, float] = field(repr=False)
     sfp_channel_count: int = 5
@@ -78,6 +67,7 @@ class SyntheticMultichannelSimulator:
         self,
         servers: Mapping[str, Any],
         *,
+        catalog: SyntheticSensorCatalog,
         seed: int,
         scenario: str = "normal",
         tick_seconds: int = 300,
@@ -93,6 +83,7 @@ class SyntheticMultichannelSimulator:
         self.seed = int(seed)
         self.tick_seconds = int(tick_seconds)
         self.start_time = selected_start.astimezone(UTC)
+        self.catalog = catalog
         self._scenario = self._validate_scenario(scenario)
         self._tick = 0
         self._lock = threading.RLock()
@@ -252,12 +243,19 @@ class SyntheticMultichannelSimulator:
         servers: Mapping[str, Any],
     ) -> dict[str, dict[int, MetricSensorProfile]]:
         profiles: dict[str, dict[int, MetricSensorProfile]] = {}
-        ordinal = 0
         sfp_ordinal = 0
         for server_slug, server in servers.items():
             server_profiles: dict[int, MetricSensorProfile] = {}
             for legacy_sensor in server.sensors.values():
-                family = SENSOR_FAMILY_CYCLE[ordinal % len(SENSOR_FAMILY_CYCLE)]
+                catalog_entry = self.catalog.get(
+                    server.server_id,
+                    legacy_sensor.objid,
+                )
+                if catalog_entry.server_slug != server_slug:
+                    raise ValueError(
+                        "synthetic catalog server slug does not match topology"
+                    )
+                family = catalog_entry.family
                 rng = random.Random(
                     self._derived_seed(server_slug, legacy_sensor.objid)
                 )
@@ -283,18 +281,18 @@ class SyntheticMultichannelSimulator:
                     sfp_ordinal += 1
                 server_profiles[legacy_sensor.objid] = MetricSensorProfile(
                     server_slug=server_slug,
-                    server_id=f"srv-{server_slug}",
+                    server_id=catalog_entry.server_id,
                     group_name=server.name,
                     sensor_id=legacy_sensor.objid,
                     parent_id=legacy_sensor.parentid,
                     device_name=legacy_sensor.device,
                     family=family,
+                    primary_source_channel=catalog_entry.primary_source_channel,
                     phase=rng.uniform(0.0, math.tau),
                     parameters=parameters,
                     sfp_channel_count=sfp_channel_count,
                     legacy_sensor=legacy_sensor,
                 )
-                ordinal += 1
             profiles[server_slug] = server_profiles
         return profiles
 
@@ -339,7 +337,7 @@ class SyntheticMultichannelSimulator:
             "objid": profile.sensor_id,
             "parentid": profile.parent_id,
             "device": profile.device_name,
-            "sensor": FAMILY_DISPLAY_NAMES[profile.family],
+            "sensor": legacy["sensor"],
             "group_name": profile.group_name,
             "status": legacy["status"],
             "status_raw": legacy["status_raw"],
@@ -421,11 +419,10 @@ class SyntheticMultichannelSimulator:
             {"channel": "Memory Usage", "value": f"{self._number(usage, 2)} %"},
             {
                 "channel": "Used Memory",
-                "value": self._scaled_value(
+                "value": self._scaled_integer_value(
                     used_bytes,
                     (("KByte", 1_000.0), ("MByte", 1_000_000.0), ("GByte", 1_000_000_000.0)),
                     profile.sensor_id + tick,
-                    precision=3,
                 ),
             },
         ]
@@ -562,6 +559,15 @@ class SyntheticMultichannelSimulator:
         return f"{cls._number(value / factor, precision)} {unit}"
 
     @staticmethod
+    def _scaled_integer_value(
+        value: float,
+        units: tuple[tuple[str, float], ...],
+        selector: int,
+    ) -> str:
+        unit, factor = units[selector % len(units)]
+        return f"{round(value / factor)} {unit}"
+
+    @staticmethod
     def _clamp(value: float, minimum: float, maximum: float) -> float:
         return max(minimum, min(maximum, value))
 
@@ -570,7 +576,6 @@ __all__ = [
     "DEFAULT_START_TIME",
     "FAMILY_DISPLAY_NAMES",
     "MetricSensorProfile",
-    "SENSOR_FAMILY_CYCLE",
     "SUPPORTED_FAULTS",
     "SUPPORTED_SCENARIOS",
     "SyntheticMultichannelSimulator",

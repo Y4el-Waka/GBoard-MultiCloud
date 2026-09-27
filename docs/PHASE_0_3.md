@@ -275,6 +275,22 @@ the provider-neutral domain and versioned API to a multichannel presentation.
 This is not a full dashboard redesign and does not make the experimental v2
 contract or synthetic provider a production default.
 
+## Phase 0.3F.3: Synthetic sensor identity and data consistency
+
+The laboratory now creates one deterministic catalog keyed by
+`(server_id, sensor_id)`. It is the sole authority for family, legacy display
+name, and primary source channel. Legacy `lastvalue` is taken from that primary
+channel at logical tick zero, while current/history multichannel payloads use
+the same family and identity. The previous independent eight-name and
+ten-family cycles were removed.
+
+The documented `srv_lab_XX` server IDs are emitted by the simulator and
+validated by the localhost provider. Exhaustive tests traverse all 1,000
+sensors and validate names, primary values, metadata-equivalent source fields,
+historical channels, determinism, distribution, and composite-key isolation.
+A real local HTTP integration test covers legacy API, collector, snapshot,
+metadata v2, and history v2.
+
 ## Phase 0.3 closure boundary
 
 - `/api/history`, the legacy snapshot, collector, SQLite, MF, and sensor

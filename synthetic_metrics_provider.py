@@ -59,6 +59,7 @@ class SyntheticHistoricalMetricsSource:
         end: datetime | None,
     ) -> Mapping[str, Any]:
         base_url = self._local_simulator_url(server)
+        expected_server_id = self._server_id(server)
         sensor_text = str(sensor_id or "").strip()
         if not sensor_text or isinstance(sensor_id, bool):
             raise HistoricalMetricsSourceError(
@@ -80,6 +81,7 @@ class SyntheticHistoricalMetricsSource:
                 )
             return self._request_history(
                 base_url,
+                expected_server_id=expected_server_id,
                 sensor_id=sensor_text,
                 points=points,
             )
@@ -93,6 +95,7 @@ class SyntheticHistoricalMetricsSource:
 
         probe = self._request_history(
             base_url,
+            expected_server_id=expected_server_id,
             sensor_id=sensor_text,
             points=1,
         )
@@ -120,6 +123,7 @@ class SyntheticHistoricalMetricsSource:
             if required_points == 1
             else self._request_history(
                 base_url,
+                expected_server_id=expected_server_id,
                 sensor_id=sensor_text,
                 points=required_points,
             )
@@ -144,6 +148,7 @@ class SyntheticHistoricalMetricsSource:
     ) -> Mapping[str, Any]:
         """Return only the explicit identity/type fields needed by clients."""
         base_url = self._local_simulator_url(server)
+        expected_server_id = self._server_id(server)
         sensor_text = str(sensor_id or "").strip()
         if not sensor_text or isinstance(sensor_id, bool):
             raise HistoricalMetricsSourceError(
@@ -159,14 +164,19 @@ class SyntheticHistoricalMetricsSource:
                 "synthetic metrics source returned invalid metadata"
             )
         payload_sensor_id = str(payload.get("objid") or "").strip()
+        payload_server_id = str(payload.get("server_id") or "").strip()
         sensor_type = str(payload.get("sensor_type") or "").strip().casefold()
-        if payload_sensor_id != sensor_text or not sensor_type:
+        if (
+            payload_server_id != expected_server_id
+            or payload_sensor_id != sensor_text
+            or not sensor_type
+        ):
             raise HistoricalMetricsSourceError(
                 "synthetic metrics source returned mismatched metadata"
             )
 
         return {
-            "server_id": str(payload.get("server_id") or "").strip(),
+            "server_id": payload_server_id,
             "sensor_id": payload_sensor_id,
             "sensor_type": sensor_type,
         }
@@ -175,6 +185,7 @@ class SyntheticHistoricalMetricsSource:
         self,
         base_url: str,
         *,
+        expected_server_id: str,
         sensor_id: str,
         points: int,
     ) -> dict[str, Any]:
@@ -192,6 +203,10 @@ class SyntheticHistoricalMetricsSource:
             raise HistoricalMetricsSourceError(
                 "synthetic metrics source returned a mismatched sensor"
             )
+        if str(payload.get("server_id") or "").strip() != expected_server_id:
+            raise HistoricalMetricsSourceError(
+                "synthetic metrics source returned a mismatched server"
+            )
         samples = payload.get("samples")
         if (
             not isinstance(samples, Sequence)
@@ -202,6 +217,15 @@ class SyntheticHistoricalMetricsSource:
                 "synthetic metrics source returned no samples"
             )
         return payload
+
+    @staticmethod
+    def _server_id(server: Mapping[str, Any]) -> str:
+        server_id = str(server.get("id") or "").strip()
+        if not server_id:
+            raise HistoricalMetricsSourceError(
+                "synthetic server identity is invalid"
+            )
+        return server_id
 
     def _request_json(
         self,
