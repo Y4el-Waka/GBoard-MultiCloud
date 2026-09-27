@@ -42,12 +42,56 @@ class HistorySensorNotFoundError(HistoryServiceError):
     """The requested sensor does not exist in the normalized source."""
 
 
+class HistorySensorUnsupportedError(HistoryServiceError):
+    """The source explicitly identifies an unsupported sensor family."""
+
+
+class HistorySensorUnknownError(HistoryServiceError):
+    """The source cannot safely classify the selected sensor."""
+
+
+class HistoryUpstreamAuthenticationError(HistoryUpstreamError):
+    """The configured upstream credentials were rejected."""
+
+
+class HistoryUpstreamRateLimitError(HistoryUpstreamError):
+    """The conservative upstream request budget is exhausted."""
+
+
+class HistoryUpstreamInvalidResponseError(HistoryUpstreamError):
+    """The upstream response was structurally unusable."""
+
+
 class HistoricalMetricsSourceError(Exception):
     """A normalized-history source failed before adaptation."""
 
 
 class HistoricalMetricsSensorNotFoundError(HistoricalMetricsSourceError):
     """A normalized-history source could not locate the requested sensor."""
+
+
+class HistoricalMetricsAuthenticationError(HistoricalMetricsSourceError):
+    """A normalized source rejected configured credentials."""
+
+
+class HistoricalMetricsRateLimitError(HistoricalMetricsSourceError):
+    """A normalized source exhausted its read request budget."""
+
+
+class HistoricalMetricsInvalidResponseError(HistoricalMetricsSourceError):
+    """A normalized source returned structurally invalid data."""
+
+
+class HistoricalMetricsTransportError(HistoricalMetricsSourceError):
+    """A normalized source could not reach its configured upstream."""
+
+
+class HistoricalMetricsUnsupportedSensorError(HistoricalMetricsSourceError):
+    """The source explicitly identifies an unsupported sensor family."""
+
+
+class HistoricalMetricsUnknownSensorError(HistoricalMetricsSourceError):
+    """The source has insufficient evidence to classify a sensor."""
 
 
 ServerMap = Mapping[str, Mapping[str, Any]]
@@ -299,6 +343,26 @@ class HistoryService:
             raise HistorySensorNotFoundError(
                 f"Sensor '{sensor_text}' no encontrado"
             ) from None
+        except HistoricalMetricsUnsupportedSensorError:
+            raise HistorySensorUnsupportedError(
+                f"Sensor '{sensor_text}' no soportado"
+            ) from None
+        except HistoricalMetricsUnknownSensorError:
+            raise HistorySensorUnknownError(
+                f"Sensor '{sensor_text}' sin clasificacion confiable"
+            ) from None
+        except HistoricalMetricsAuthenticationError:
+            raise HistoryUpstreamAuthenticationError(
+                "La autenticacion PRTG fue rechazada"
+            ) from None
+        except HistoricalMetricsRateLimitError:
+            raise HistoryUpstreamRateLimitError(
+                "Se agoto el presupuesto de consultas historicas"
+            ) from None
+        except HistoricalMetricsInvalidResponseError:
+            raise HistoryUpstreamInvalidResponseError(
+                "PRTG devolvio una respuesta historica invalida"
+            ) from None
         except (HistoricalMetricsSourceError, PRTGClientError) as exc:
             self._logger.warning(
                 "Error consultando historico normalizado "
@@ -315,16 +379,6 @@ class HistoryService:
                 "La fuente historica normalizada devolvio un payload invalido"
             )
 
-        source_samples = payload.get("samples")
-        if (
-            not isinstance(source_samples, Sequence)
-            or isinstance(source_samples, (str, bytes, bytearray))
-            or not source_samples
-        ):
-            raise HistoryUpstreamError(
-                "La fuente historica normalizada no devolvio muestras"
-            )
-
         expected_identity = SensorIdentity(
             server_id=server_id,
             sensor_id=sensor_text,
@@ -333,36 +387,124 @@ class HistoryService:
         collected_samples: list[MetricSample] = []
         unknown_channels: list[UnknownChannel] = []
         issues: list[AdapterIssue] = []
+        effective_start = normalized_start
+        effective_end = normalized_end
 
-        for source_sample in source_samples:
+        if payload.get("format") == "prtg_historic_csv":
+            payload_server_id = str(payload.get("server_id") or "").strip()
+            payload_sensor_id = str(
+                payload.get("sensor_id", payload.get("objid", ""))
+            ).strip()
+            payload_sensor_type = str(
+                payload.get("sensor_type") or ""
+            ).strip().casefold()
+            if payload_server_id != server_id or payload_sensor_id != sensor_text:
+                raise HistoryUpstreamError(
+                    "La identidad del historico normalizado no coincide "
+                    "con la solicitud"
+                )
+            if payload_sensor_type != selected_type:
+                raise HistoryValidationError(
+                    "sensor_type no coincide con la clasificacion del sensor"
+                )
+            historic_csv = payload.get("historic_csv")
+            payload_timezone = payload.get("source_timezone", source_timezone)
+            source_metadata = payload.get("source_metadata")
+            requested_start = self._normalize_boundary(
+                payload.get("requested_start"),
+                "provider requested_start",
+            )
+            requested_end = self._normalize_boundary(
+                payload.get("requested_end"),
+                "provider requested_end",
+            )
+            if requested_start is None or requested_end is None:
+                raise HistoryUpstreamInvalidResponseError(
+                    "La fuente PRTG no declaro el rango consultado"
+                )
+            if requested_start >= requested_end:
+                raise HistoryUpstreamInvalidResponseError(
+                    "La fuente PRTG declaro un rango invalido"
+                )
+            effective_start = requested_start
+            effective_end = requested_end
+            if not isinstance(historic_csv, str) or not historic_csv.strip():
+                raise HistoryUpstreamInvalidResponseError(
+                    "La fuente PRTG no devolvio CSV historico"
+                )
+            if source_metadata is not None and not isinstance(source_metadata, Mapping):
+                raise HistoryUpstreamInvalidResponseError(
+                    "La metadata de historico PRTG es invalida"
+                )
             try:
-                adapted = self._metric_adapter.adapt_sensor(
-                    source_sample,
+                adapted = self._metric_adapter.adapt_historic_csv(
+                    historic_csv,
                     server_id=server_id,
+                    sensor_id=sensor_text,
                     sensor_type=selected_type,
-                    source_timezone=source_timezone,
+                    source_timezone=payload_timezone,
+                    device_id=payload.get("device_id"),
+                    source_metadata=source_metadata,
                 )
             except PRTGAdapterError as exc:
                 self._logger.warning(
-                    "Fuente historica normalizada invalida "
+                    "CSV historico PRTG invalido "
                     "server_id=%s adapter_error=%s",
                     server_id,
                     type(exc).__name__,
                 )
-                raise HistoryUpstreamError(
-                    "No se pudo normalizar la fuente historica"
+                raise HistoryUpstreamInvalidResponseError(
+                    "No se pudo normalizar el CSV historico PRTG"
                 ) from None
-
             if adapted.identity != expected_identity:
                 raise HistoryUpstreamError(
                     "La identidad del historico normalizado no coincide "
                     "con la solicitud"
                 )
-            if adapted_identity is None:
-                adapted_identity = adapted.identity
+            adapted_identity = adapted.identity
             collected_samples.extend(adapted.samples)
             unknown_channels.extend(adapted.unknown_channels)
             issues.extend(adapted.issues)
+        else:
+            source_samples = payload.get("samples")
+            if (
+                not isinstance(source_samples, Sequence)
+                or isinstance(source_samples, (str, bytes, bytearray))
+                or not source_samples
+            ):
+                raise HistoryUpstreamError(
+                    "La fuente historica normalizada no devolvio muestras"
+                )
+
+            for source_sample in source_samples:
+                try:
+                    adapted = self._metric_adapter.adapt_sensor(
+                        source_sample,
+                        server_id=server_id,
+                        sensor_type=selected_type,
+                        source_timezone=source_timezone,
+                    )
+                except PRTGAdapterError as exc:
+                    self._logger.warning(
+                        "Fuente historica normalizada invalida "
+                        "server_id=%s adapter_error=%s",
+                        server_id,
+                        type(exc).__name__,
+                    )
+                    raise HistoryUpstreamError(
+                        "No se pudo normalizar la fuente historica"
+                    ) from None
+
+                if adapted.identity != expected_identity:
+                    raise HistoryUpstreamError(
+                        "La identidad del historico normalizado no coincide "
+                        "con la solicitud"
+                    )
+                if adapted_identity is None:
+                    adapted_identity = adapted.identity
+                collected_samples.extend(adapted.samples)
+                unknown_channels.extend(adapted.unknown_channels)
+                issues.extend(adapted.issues)
 
         # Provider order is authoritative: for a duplicate timestamp/channel,
         # the last observation replaces earlier values deterministically.
@@ -375,6 +517,22 @@ class HistoryService:
                 key=lambda sample: (sample.timestamp, sample.channel_key),
             )
         )
+
+        if effective_start is not None and effective_end is not None:
+            ordered_samples = tuple(
+                sample
+                for sample in ordered_samples
+                if effective_start <= sample.timestamp <= effective_end
+            )
+        if points is not None and ordered_samples:
+            selected_timestamps = set(
+                sorted({sample.timestamp for sample in ordered_samples})[-points:]
+            )
+            ordered_samples = tuple(
+                sample
+                for sample in ordered_samples
+                if sample.timestamp in selected_timestamps
+            )
 
         present_keys = {sample.channel_key for sample in ordered_samples}
         channels = tuple(
@@ -437,6 +595,26 @@ class HistoryService:
             raise HistorySensorNotFoundError(
                 f"Sensor '{sensor_text}' no encontrado"
             ) from None
+        except HistoricalMetricsUnsupportedSensorError:
+            raise HistorySensorUnsupportedError(
+                f"Sensor '{sensor_text}' no soportado"
+            ) from None
+        except HistoricalMetricsUnknownSensorError:
+            raise HistorySensorUnknownError(
+                f"Sensor '{sensor_text}' sin clasificacion confiable"
+            ) from None
+        except HistoricalMetricsAuthenticationError:
+            raise HistoryUpstreamAuthenticationError(
+                "La autenticacion PRTG fue rechazada"
+            ) from None
+        except HistoricalMetricsRateLimitError:
+            raise HistoryUpstreamRateLimitError(
+                "Se agoto el presupuesto de consultas historicas"
+            ) from None
+        except HistoricalMetricsInvalidResponseError:
+            raise HistoryUpstreamInvalidResponseError(
+                "PRTG devolvio metadata invalida"
+            ) from None
         except (HistoricalMetricsSourceError, PRTGClientError) as exc:
             self._logger.warning(
                 "Error consultando metadata normalizada "
@@ -462,6 +640,17 @@ class HistoryService:
             )
 
         sensor_type = str(payload.get("sensor_type") or "").strip().casefold()
+        classification_status = str(
+            payload.get("classification_status") or "supported"
+        ).strip().casefold()
+        if classification_status == "unsupported" or sensor_type == "unsupported":
+            raise HistorySensorUnsupportedError(
+                "tipo de sensor normalizado no soportado"
+            )
+        if classification_status == "unknown" or sensor_type == "unknown":
+            raise HistorySensorUnknownError(
+                "tipo de sensor normalizado desconocido"
+            )
         try:
             get_sensor_definition(sensor_type)
         except KeyError:

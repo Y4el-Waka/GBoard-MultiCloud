@@ -104,6 +104,74 @@ class ConfigurationTests(unittest.TestCase):
                 environ={"COREVIEW_METRICS_PROVIDER": "automatic"}
             )
 
+    def test_prtg_metrics_provider_requires_secure_explicit_settings(self) -> None:
+        valid = config.load_app_settings(
+            environ={
+                "COREVIEW_METRICS_PROVIDER": "prtg",
+                "COREVIEW_PRTG_SOURCE_TIMEZONE": "America/Mexico_City",
+                "PRTG_VERIFY_SSL": "true",
+            }
+        )
+
+        self.assertEqual(valid.metrics_provider, "prtg")
+        self.assertEqual(valid.prtg_source_timezone, "America/Mexico_City")
+        self.assertEqual(valid.prtg_history_average_seconds, 300)
+        self.assertEqual(valid.prtg_history_max_requests_per_minute, 5)
+        self.assertEqual(valid.prtg_discovery_cache_ttl_seconds, 300)
+        self.assertEqual(valid.prtg_discovery_cache_max_entries, 128)
+        self.assertEqual(valid.prtg_metrics_expected_processes, 1)
+
+        invalid_environments = (
+            {
+                "COREVIEW_METRICS_PROVIDER": "prtg",
+                "PRTG_VERIFY_SSL": "true",
+            },
+            {
+                "COREVIEW_METRICS_PROVIDER": "prtg",
+                "COREVIEW_PRTG_SOURCE_TIMEZONE": "not/a-timezone",
+                "PRTG_VERIFY_SSL": "true",
+            },
+            {
+                "COREVIEW_METRICS_PROVIDER": "prtg",
+                "COREVIEW_PRTG_SOURCE_TIMEZONE": "UTC",
+                "PRTG_VERIFY_SSL": "false",
+            },
+            {
+                "COREVIEW_METRICS_PROVIDER": "prtg",
+                "COREVIEW_PRTG_SOURCE_TIMEZONE": "UTC",
+                "PRTG_VERIFY_SSL": "true",
+                "COREVIEW_PRTG_METRICS_EXPECTED_PROCESSES": "2",
+            },
+        )
+        for environment in invalid_environments:
+            with self.subTest(environment=environment):
+                with self.assertRaises(ValueError):
+                    config.load_app_settings(environ=environment)
+
+    def test_prtg_metrics_provider_limits_are_typed_and_bounded(self) -> None:
+        settings = config.load_app_settings(
+            environ={
+                "COREVIEW_PRTG_HISTORY_AVERAGE_SECONDS": "600",
+                "COREVIEW_PRTG_HISTORY_MAX_REQUESTS_PER_MINUTE": "3",
+                "COREVIEW_PRTG_DISCOVERY_CACHE_TTL_SECONDS": "45",
+                "COREVIEW_PRTG_DISCOVERY_CACHE_MAX_ENTRIES": "16",
+            }
+        )
+        self.assertEqual(settings.prtg_history_average_seconds, 600)
+        self.assertEqual(settings.prtg_history_max_requests_per_minute, 3)
+        self.assertEqual(settings.prtg_discovery_cache_ttl_seconds, 45)
+        self.assertEqual(settings.prtg_discovery_cache_max_entries, 16)
+
+        for name, value in (
+            ("COREVIEW_PRTG_HISTORY_AVERAGE_SECONDS", "59"),
+            ("COREVIEW_PRTG_HISTORY_MAX_REQUESTS_PER_MINUTE", "6"),
+            ("COREVIEW_PRTG_DISCOVERY_CACHE_TTL_SECONDS", "-1"),
+            ("COREVIEW_PRTG_DISCOVERY_CACHE_MAX_ENTRIES", "0"),
+        ):
+            with self.subTest(name=name):
+                with self.assertRaises(ValueError):
+                    config.load_app_settings(environ={name: value})
+
     def test_metrics_ui_feature_flag_is_explicit_and_typed(self) -> None:
         enabled = config.load_app_settings(
             environ={"COREVIEW_METRICS_UI_ENABLED": "true"}

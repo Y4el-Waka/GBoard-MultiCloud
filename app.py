@@ -41,13 +41,19 @@ from flask import (
 from history_service import (
     HistoricalMetricsSource,
     HistorySensorNotFoundError,
+    HistorySensorUnknownError,
+    HistorySensorUnsupportedError,
     HistoryServerNotFoundError,
     HistoryService,
+    HistoryUpstreamAuthenticationError,
     HistoryUpstreamError,
+    HistoryUpstreamInvalidResponseError,
+    HistoryUpstreamRateLimitError,
     HistoryValidationError,
 )
 from metrics.serialization import serialize_normalized_history
 from prtg_client import PRTGClient
+from real_metrics_provider import RealHistoricalMetricsSource
 from sensor_control_service import (
     SensorControlService,
     SensorControlUpstreamError,
@@ -1477,6 +1483,30 @@ def create_app(
         app.logger.info(
             "Metrics API v2 laboratory provider enabled: synthetic"
         )
+    elif (
+        selected_normalized_source is None
+        and APP_SETTINGS.metrics_provider == "prtg"
+    ):
+        selected_normalized_source = RealHistoricalMetricsSource(
+            client_factory=lambda: new_prtg_client(app),
+            source_timezone=APP_SETTINGS.prtg_source_timezone or "",
+            history_average_seconds=(
+                APP_SETTINGS.prtg_history_average_seconds
+            ),
+            metadata_cache_ttl_seconds=(
+                APP_SETTINGS.prtg_discovery_cache_ttl_seconds
+            ),
+            metadata_cache_max_entries=(
+                APP_SETTINGS.prtg_discovery_cache_max_entries
+            ),
+            max_history_requests_per_minute=(
+                APP_SETTINGS.prtg_history_max_requests_per_minute
+            ),
+            expected_processes=APP_SETTINGS.prtg_metrics_expected_processes,
+        )
+        app.logger.info(
+            "Metrics API v2 experimental read-only provider enabled: prtg"
+        )
 
     def current_history_servers():
         return app.prtg_servers  # type: ignore[attr-defined]
@@ -1946,6 +1976,20 @@ def create_app(
             return jsonify(
                 {"error": "Sensor no encontrado", "code": "sensor_not_found"}
             ), 404
+        except HistorySensorUnsupportedError:
+            return jsonify(
+                {
+                    "error": "Tipo de sensor no soportado",
+                    "code": "sensor_type_unsupported",
+                }
+            ), 400
+        except HistorySensorUnknownError:
+            return jsonify(
+                {
+                    "error": "No fue posible clasificar el sensor",
+                    "code": "sensor_type_unknown",
+                }
+            ), 400
         except HistoryValidationError:
             return jsonify(
                 {
@@ -1953,6 +1997,27 @@ def create_app(
                     "code": "invalid_request",
                 }
             ), 400
+        except HistoryUpstreamAuthenticationError:
+            return jsonify(
+                {
+                    "error": "Autenticacion upstream rechazada",
+                    "code": "upstream_authentication_error",
+                }
+            ), 502
+        except HistoryUpstreamRateLimitError:
+            return jsonify(
+                {
+                    "error": "Presupuesto de consultas upstream agotado",
+                    "code": "upstream_rate_limited",
+                }
+            ), 502
+        except HistoryUpstreamInvalidResponseError:
+            return jsonify(
+                {
+                    "error": "Respuesta upstream invalida",
+                    "code": "upstream_invalid_response",
+                }
+            ), 502
         except HistoryUpstreamError:
             return jsonify(
                 {
@@ -2083,6 +2148,20 @@ def create_app(
             return jsonify(
                 {"error": "Sensor no encontrado", "code": "sensor_not_found"}
             ), 404
+        except HistorySensorUnsupportedError:
+            return jsonify(
+                {
+                    "error": "Tipo de sensor no soportado",
+                    "code": "sensor_type_unsupported",
+                }
+            ), 400
+        except HistorySensorUnknownError:
+            return jsonify(
+                {
+                    "error": "No fue posible clasificar el sensor",
+                    "code": "sensor_type_unknown",
+                }
+            ), 400
 
         except HistoryValidationError:
             return jsonify(
@@ -2092,6 +2171,27 @@ def create_app(
                 }
             ), 400
 
+        except HistoryUpstreamAuthenticationError:
+            return jsonify(
+                {
+                    "error": "Autenticacion upstream rechazada",
+                    "code": "upstream_authentication_error",
+                }
+            ), 502
+        except HistoryUpstreamRateLimitError:
+            return jsonify(
+                {
+                    "error": "Presupuesto de consultas upstream agotado",
+                    "code": "upstream_rate_limited",
+                }
+            ), 502
+        except HistoryUpstreamInvalidResponseError:
+            return jsonify(
+                {
+                    "error": "Respuesta upstream invalida",
+                    "code": "upstream_invalid_response",
+                }
+            ), 502
         except HistoryUpstreamError:
             return jsonify(
                 {

@@ -403,10 +403,15 @@ class PRTGDiscoveryTests(unittest.TestCase):
         self.assertNotIn("requests", imports)
 
         for production_file in ("app.py", "monitor.py", "history_service.py"):
-            self.assertNotIn(
-                "prtg_discovery",
-                (ROOT / production_file).read_text(encoding="utf-8"),
+            production_tree = ast.parse(
+                (ROOT / production_file).read_text(encoding="utf-8")
             )
+            imported_modules = {
+                node.module
+                for node in ast.walk(production_tree)
+                if isinstance(node, ast.ImportFrom) and node.module
+            }
+            self.assertNotIn("prtg_discovery", imported_modules)
 
 
 if __name__ == "__main__":

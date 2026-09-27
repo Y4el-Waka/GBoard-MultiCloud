@@ -17,7 +17,12 @@ from metrics.prtg_mappings import (
     resolve_channel,
     resolve_unit,
 )
-from prtg_client import PRTGClient, PRTGClientError
+from prtg_client import (
+    PRTGAuthenticationError,
+    PRTGClient,
+    PRTGClientError,
+    PRTGConnectionError,
+)
 
 
 class PRTGDiscoveryError(Exception):
@@ -34,6 +39,14 @@ class PRTGDiscoveryNotFoundError(PRTGDiscoveryError):
 
 class PRTGDiscoveryUpstreamError(PRTGDiscoveryError):
     """PRTG could not provide structurally usable discovery data."""
+
+
+class PRTGDiscoveryAuthenticationError(PRTGDiscoveryUpstreamError):
+    """PRTG rejected the configured read-only credentials."""
+
+
+class PRTGDiscoveryConnectionError(PRTGDiscoveryUpstreamError):
+    """The configured PRTG endpoint could not be reached."""
 
 
 class PRTGSensorFamily(StrEnum):
@@ -649,6 +662,24 @@ class PRTGSensorDiscovery:
             with self._client_factory() as client:
                 sensor_payload = client.get_sensor_metadata(server, sensor_text)
                 channel_csv = client.get_channels_csv(server, sensor_text)
+        except PRTGAuthenticationError:
+            self._logger.warning(
+                "PRTG discovery authentication failed server_id=%s sensor_id=%s",
+                server_id,
+                sensor_text,
+            )
+            raise PRTGDiscoveryAuthenticationError(
+                "PRTG discovery authentication failed"
+            ) from None
+        except PRTGConnectionError:
+            self._logger.warning(
+                "PRTG discovery connection failed server_id=%s sensor_id=%s",
+                server_id,
+                sensor_text,
+            )
+            raise PRTGDiscoveryConnectionError(
+                "PRTG discovery connection failed"
+            ) from None
         except PRTGClientError as exc:
             self._logger.warning(
                 "PRTG discovery failed server_id=%s sensor_id=%s error_type=%s",
@@ -694,6 +725,25 @@ class PRTGSensorDiscovery:
                     average_seconds=average_seconds,
                     allow_redirects=False,
                 )
+        except PRTGAuthenticationError:
+            self._logger.warning(
+                "PRTG historic authentication failed "
+                "server_id=%s sensor_id=%s",
+                str(server.get("id") or "missing"),
+                sensor_text,
+            )
+            raise PRTGDiscoveryAuthenticationError(
+                "PRTG historic authentication failed"
+            ) from None
+        except PRTGConnectionError:
+            self._logger.warning(
+                "PRTG historic connection failed server_id=%s sensor_id=%s",
+                str(server.get("id") or "missing"),
+                sensor_text,
+            )
+            raise PRTGDiscoveryConnectionError(
+                "PRTG historic connection failed"
+            ) from None
         except PRTGClientError as exc:
             self._logger.warning(
                 "PRTG historic characterization failed "
@@ -712,6 +762,8 @@ __all__ = [
     "PRTGClassification",
     "PRTGDiscoveredChannel",
     "PRTGDiscoveryError",
+    "PRTGDiscoveryAuthenticationError",
+    "PRTGDiscoveryConnectionError",
     "PRTGDiscoveryNotFoundError",
     "PRTGDiscoveryUpstreamError",
     "PRTGDiscoveryValidationError",

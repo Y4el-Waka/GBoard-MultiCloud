@@ -1,15 +1,20 @@
 # Phase 0.4: Real PRTG metrics acquisition
 
 - Status: In progress
-- Current increment: 0.4A complete against sanitized fixtures
+- Current increment: 0.4B implemented against sanitized fixtures
 - Real PRTG validation: Pending; no authorized instance was contacted
+- `implementation_complete_with_fixtures: true`
+- `validated_against_real_prtg: false`
 
 ## Objective
 
 Phase 0.4 prepares a production-capable normalized metrics source without
 changing the stable legacy application or the Phase 0.3 laboratory flow.
 Phase 0.4A characterizes the original PRTG HTTP API and adds a safe read-only
-discovery boundary. It does not implement `RealMetricsProvider`.
+discovery boundary. Phase 0.4B connects that boundary to the existing
+normalized service/API path through an explicit real-source provider. This is
+an implementation result against fixtures, not a production compatibility
+claim.
 
 ## Phase 0.4A architecture
 
@@ -215,20 +220,138 @@ synthetic simulators, MF, or sensor controls. Existing PRTG client calls retain
 their redirect behavior and public signatures; only the new discovery methods
 force redirect rejection.
 
-## Planned next increment: Phase 0.4B
+## Phase 0.4B: real-source provider
 
-Build an opt-in `RealHistoricalMetricsSource` only after an authorized capture
-matrix validates the exact installed PRTG versions and source types. Phase 0.4B
-should:
+```text
+configured PRTG server + selected sensor
+                 |
+             PRTGClient
+                 |
+       PRTGSensorDiscovery
+                 |
+    RealHistoricalMetricsSource
+      | metadata       | source CSV + timezone/aggregation
+      +----------------+
+                 |
+           HistoryService
+                 |
+         PRTGMetricAdapter
+                 |
+ NormalizedHistoryResult / SensorMetricMetadata
+                 |
+       CoreView metrics API v2
+```
 
-1. capture and sanitize one selected sensor per supported family;
-2. promote only confirmed source type/channel aliases into mappings;
-3. provide explicit source timezone and locale policy;
-4. feed source histories into `PRTGMetricAdapter` without duplicating parsing;
-5. enforce per-server history request budgets and bounded metadata caching;
-6. keep unknown sensors/channels observable and unsupported by default;
-7. remain opt-in beside the synthetic provider until parity and security review
-   are complete.
+`RealHistoricalMetricsSource` implements the same small provider protocol as
+the synthetic source. It does not import the synthetic catalog and never
+falls back to synthetic data. Discovery verifies the exact returned sensor ID
+and fails closed as `unknown` or `unsupported` when evidence is insufficient.
+History is requested only after a user selects one sensor.
 
-Counter-to-rate, normalized persistence, distributed cache, dashboard redesign,
-and cloud deployment remain out of scope.
+The provider transports raw CSV and source metadata to `HistoryService`.
+`PRTGMetricAdapter` remains the only component that maps aliases, parses
+numeric values, converts units, normalizes UTC timestamps, and emits issues or
+unknown channels. Accumulated traffic volume and counters are not converted to
+bps.
+
+### Activation
+
+The default remains disabled. For an owned or explicitly authorized PRTG:
+
+```dotenv
+COREVIEW_METRICS_PROVIDER=prtg
+COREVIEW_PRTG_SOURCE_TIMEZONE=America/Mexico_City
+COREVIEW_PRTG_HISTORY_AVERAGE_SECONDS=300
+COREVIEW_PRTG_HISTORY_MAX_REQUESTS_PER_MINUTE=5
+COREVIEW_PRTG_DISCOVERY_CACHE_TTL_SECONDS=300
+COREVIEW_PRTG_DISCOVERY_CACHE_MAX_ENTRIES=128
+COREVIEW_PRTG_METRICS_EXPECTED_PROCESSES=1
+PRTG_VERIFY_SSL=true
+```
+
+The selected server must be present in the normal ignored runtime
+configuration with a stable `id`, HTTPS URL, username, and password or
+passhash. Secrets stay outside version control. Application startup constructs
+the provider but performs no network request.
+
+### Points and range semantics
+
+- `points=N` requests the real source window from `now - N * avg` through
+  `now`. PRTG may return fewer points; CoreView keeps at most the latest `N`
+  distinct source timestamps and never invents timestamps.
+- `start/end` forwards the exact timezone-aware range after conversion to the
+  configured PRTG source timezone. Samples outside the requested range are not
+  presented as valid results.
+- `avg` is source aggregation metadata, not a promise that every interval has
+  a sample.
+
+### Load controls and cache
+
+- Historic calls use a per-`server_id`, thread-safe, sliding one-minute budget
+  capped at five. Budget exhaustion returns the existing v2 `502` boundary
+  with code `upstream_rate_limited`.
+- Successful discovery is held in a bounded TTL/LRU cache keyed by
+  `(server_id, sensor_id)`. Authentication, transport, invalid-response, and
+  not-found errors are not cached.
+- Both mechanisms are process-local. `prtg` mode therefore validates
+  `COREVIEW_PRTG_METRICS_EXPECTED_PROCESSES=1`. Actual WSGI process count
+  cannot be discovered reliably; the operator must deploy one application
+  process until a shared coordinator exists.
+- No background history scan and no normalized history cache were added.
+
+### Error policy
+
+The service keeps distinct categories for not found, unknown/unsupported,
+authentication, rate budget, invalid upstream response, and transport. Flask
+returns only allowlisted messages/codes; it never serializes credentials, raw
+responses, authenticated URLs, or stack traces. A bad channel remains an issue
+and does not destroy valid sibling channels.
+
+### Fixture integration evidence
+
+The test suite starts an ephemeral loopback HTTP server and exercises:
+
+```text
+fixture HTTP -> PRTGClient -> discovery -> real provider -> HistoryService
+             -> PRTGMetricAdapter -> authenticated Flask API v2 -> JSON
+```
+
+Ping, CPU, memory, Traffic IN/OUT, partial SFP, localized decimal/timezone
+input, identity isolation, unknown/unsupported sensors, metadata TTL, request
+budget, auth failure, and provider composition are covered. The server binds
+only to `127.0.0.1`, uses synthetic credentials, and is stopped by the test.
+
+### Authorized manual smoke test
+
+Never run this against infrastructure you do not own or lack explicit
+authorization to query. Use a least-privilege read-only account and one
+selected sensor. After setting the runtime configuration above:
+
+```bash
+.venv/bin/python scripts/prtg_metrics_smoke.py \
+  --server-id <configured-stable-id> \
+  --sensor-id <selected-prtg-sensor-id> \
+  --points 3 \
+  --confirm-read-only-authorized
+```
+
+The command refuses to run without the acknowledgement and prints only stable
+identity, family, canonical channel keys, and counts. It does not print URLs,
+credentials, or raw PRTG payloads. A reviewed successful run may change the
+validation marker for the tested version/families; it must not be generalized
+to all PRTG installations.
+
+## Remaining Phase 0.4 work
+
+1. Run the opt-in smoke against an owned/authorized PRTG and retain only
+   sanitized, reviewed evidence.
+2. Validate installed-version captions, sensor type tokens, locale, DST,
+   aggregation, and empty/error rows before promoting additional aliases.
+3. Decide whether production needs a shared multi-process request coordinator
+   and cache; do not raise worker count in `prtg` mode before that decision.
+4. Resolve the legacy server-name request lookup and app/monitor enabled/type
+   discrepancy in a separately compatible migration.
+
+Counter-to-rate, normalized persistence, Redis/distributed cache, dashboard
+redesign, cloud infrastructure, and legacy identity migration remain out of
+scope.

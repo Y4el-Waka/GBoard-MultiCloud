@@ -1,6 +1,6 @@
 # Metrics History API v2
 
-> **Experimental - Phase 0.3**
+> **Experimental - Phase 0.4**
 
 This opt-in API exposes normalized multichannel history without changing the
 legacy `/api/history` contract or the current dashboard.
@@ -78,14 +78,18 @@ the observed range, which can be narrower than the requested range.
 | Status | Meaning |
 | --- | --- |
 | `200` | Normalized result. Partial channels, non-fatal issues, and unknown channels are successful results. |
-| `400` | Invalid query, incompatible modes, unsupported sensor type, or invalid range. |
+| `400` | Invalid query/range, or a sensor classified as unknown/unsupported. |
 | `401` | No valid CoreView session. |
 | `404` | Configured server or source sensor not found. |
 | `502` | Provider/source failure, including an unconfigured normalized provider. |
 | `500` | Unexpected application failure; no upstream detail or stack trace is exposed. |
 
-Error codes are `invalid_request`, `server_not_found`,
-`sensor_not_found`, `upstream_error`, and `internal_error`.
+Error codes are `invalid_request`, `server_not_found`, `sensor_not_found`,
+`sensor_type_unknown`, `sensor_type_unsupported`,
+`upstream_authentication_error`, `upstream_rate_limited`,
+`upstream_invalid_response`, `upstream_error`, and `internal_error`.
+Provider errors never include the source URL, credentials, raw response, or a
+stack trace.
 
 ## JSON contract
 
@@ -235,10 +239,47 @@ keep working. See `docs/LAB_METRICS_PROVIDER.md` for a complete smoke test.
 Set `COREVIEW_METRICS_UI_ENABLED=true` separately to let the dashboard consume
 v2. Its default is `false`; provider activation alone does not alter the UI.
 
+## Experimental PRTG provider
+
+Set `COREVIEW_METRICS_PROVIDER=prtg` only for an owned or explicitly
+authorized instance. This option never falls back to synthetic data. It also
+requires:
+
+```dotenv
+COREVIEW_PRTG_SOURCE_TIMEZONE=America/Mexico_City
+COREVIEW_PRTG_HISTORY_AVERAGE_SECONDS=300
+COREVIEW_PRTG_HISTORY_MAX_REQUESTS_PER_MINUTE=5
+COREVIEW_PRTG_DISCOVERY_CACHE_TTL_SECONDS=300
+COREVIEW_PRTG_DISCOVERY_CACHE_MAX_ENTRIES=128
+COREVIEW_PRTG_METRICS_EXPECTED_PROCESSES=1
+PRTG_VERIFY_SSL=true
+```
+
+The normal ignored server configuration supplies the stable server ID, HTTPS
+URL, least-privilege username, and password or passhash. Startup performs no
+PRTG request; metadata and history are queried only for a selected sensor.
+
+Points mode translates `N` to a real PRTG time window of `N * avg` ending at
+request time. It does not promise exactly `N` upstream observations, resample,
+or fabricate timestamps. Range mode forwards the exact aware start/end bounds.
+The observed response range can be narrower than the request.
+
+Successful metadata discovery is cached briefly by
+`(server_id, sensor_id)`. History is never prefetched and is protected by a
+thread-safe per-server budget capped at five calls per minute. Both controls
+are process-local, so experimental `prtg` mode is restricted to one
+application process. See `docs/PHASE_0_4.md` and ADR-014 for the manual
+read-only smoke procedure and security constraints.
+
 ## Current limitations
 
-- Only the synthetic localhost provider is implemented; a real PRTG-backed
-  multichannel provider is future work.
+- The PRTG provider is implementation-complete against sanitized fixtures but
+  has not been validated against an authorized real PRTG installation.
+- Exact installed-version sensor type tokens, channel captions, localization,
+  DST behavior, aggregation, and empty/error rows remain pending real
+  validation.
+- The PRTG request budget and metadata cache are process-local; `prtg` mode is
+  currently limited to one application process.
 - Range queries cannot exceed 1000 simulator ticks and return an upstream
   error when the requested interval contains no real logical sample.
 - There is no normalized cache. The legacy cache is unchanged and separate.

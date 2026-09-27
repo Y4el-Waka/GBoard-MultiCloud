@@ -8,6 +8,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, TypedDict
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -70,8 +71,14 @@ class AppSettings:
     default_users_json: str
     log_level: str
     flask_debug: bool
-    metrics_provider: Literal["disabled", "synthetic"]
+    metrics_provider: Literal["disabled", "synthetic", "prtg"]
     metrics_ui_enabled: bool
+    prtg_source_timezone: str | None
+    prtg_history_average_seconds: int
+    prtg_history_max_requests_per_minute: int
+    prtg_discovery_cache_ttl_seconds: int
+    prtg_discovery_cache_max_entries: int
+    prtg_metrics_expected_processes: int
 
 
 @dataclass(frozen=True)
@@ -172,14 +179,14 @@ def env_bool(
     )
 
 
-def parse_metrics_provider(value: Any) -> Literal["disabled", "synthetic"]:
+def parse_metrics_provider(value: Any) -> Literal["disabled", "synthetic", "prtg"]:
     selected = str(value or "disabled").strip().casefold()
     if selected in {"", "disabled"}:
         return "disabled"
-    if selected == "synthetic":
-        return "synthetic"
+    if selected in {"synthetic", "prtg"}:
+        return selected
     raise ValueError(
-        "COREVIEW_METRICS_PROVIDER debe ser 'disabled' o 'synthetic'"
+        "COREVIEW_METRICS_PROVIDER debe ser 'disabled', 'synthetic' o 'prtg'"
     )
 
 
@@ -276,6 +283,68 @@ def load_app_settings(
         env.get("SECRET_KEY", DEFAULT_APP_SECRET_KEY),
     )
 
+    metrics_provider = parse_metrics_provider(
+        env.get("COREVIEW_METRICS_PROVIDER")
+    )
+    prtg_source_timezone = (
+        str(env.get("COREVIEW_PRTG_SOURCE_TIMEZONE") or "").strip() or None
+    )
+    prtg_history_average_seconds = env_int(
+        "COREVIEW_PRTG_HISTORY_AVERAGE_SECONDS",
+        300,
+        environ=env,
+    )
+    prtg_history_max_requests = env_int(
+        "COREVIEW_PRTG_HISTORY_MAX_REQUESTS_PER_MINUTE",
+        5,
+        environ=env,
+    )
+    prtg_cache_ttl = env_int(
+        "COREVIEW_PRTG_DISCOVERY_CACHE_TTL_SECONDS",
+        300,
+        environ=env,
+    )
+    prtg_cache_max_entries = env_int(
+        "COREVIEW_PRTG_DISCOVERY_CACHE_MAX_ENTRIES",
+        128,
+        environ=env,
+    )
+    prtg_expected_processes = env_int(
+        "COREVIEW_PRTG_METRICS_EXPECTED_PROCESSES",
+        1,
+        environ=env,
+    )
+
+    if not 60 <= prtg_history_average_seconds <= 3600:
+        raise ValueError(
+            "COREVIEW_PRTG_HISTORY_AVERAGE_SECONDS debe estar entre 60 y 3600"
+        )
+    if not 1 <= prtg_history_max_requests <= 5:
+        raise ValueError(
+            "COREVIEW_PRTG_HISTORY_MAX_REQUESTS_PER_MINUTE debe estar entre 1 y 5"
+        )
+    if prtg_cache_ttl < 0 or prtg_cache_max_entries < 1:
+        raise ValueError("La cache de discovery PRTG tiene limites invalidos")
+    if metrics_provider == "prtg":
+        if not prtg_source_timezone:
+            raise ValueError(
+                "COREVIEW_PRTG_SOURCE_TIMEZONE es obligatorio para provider prtg"
+            )
+        try:
+            ZoneInfo(prtg_source_timezone)
+        except ZoneInfoNotFoundError:
+            raise ValueError(
+                "COREVIEW_PRTG_SOURCE_TIMEZONE debe ser una timezone IANA valida"
+            ) from None
+        if not shared.verify_ssl:
+            raise ValueError(
+                "PRTG_VERIFY_SSL debe estar habilitado para provider prtg"
+            )
+        if prtg_expected_processes != 1:
+            raise ValueError(
+                "El provider prtg experimental requiere un solo proceso"
+            )
+
     return AppSettings(
         shared=shared,
         port=env_int("PORT", 5067, environ=env),
@@ -316,14 +385,18 @@ def load_app_settings(
         default_users_json=env.get("DEFAULT_USERS_JSON", "[]"),
         log_level=env.get("LOG_LEVEL", "INFO"),
         flask_debug=env_bool("FLASK_DEBUG", False, environ=env),
-        metrics_provider=parse_metrics_provider(
-            env.get("COREVIEW_METRICS_PROVIDER")
-        ),
+        metrics_provider=metrics_provider,
         metrics_ui_enabled=env_bool(
             "COREVIEW_METRICS_UI_ENABLED",
             False,
             environ=env,
         ),
+        prtg_source_timezone=prtg_source_timezone,
+        prtg_history_average_seconds=prtg_history_average_seconds,
+        prtg_history_max_requests_per_minute=prtg_history_max_requests,
+        prtg_discovery_cache_ttl_seconds=prtg_cache_ttl,
+        prtg_discovery_cache_max_entries=prtg_cache_max_entries,
+        prtg_metrics_expected_processes=prtg_expected_processes,
     )
 
 

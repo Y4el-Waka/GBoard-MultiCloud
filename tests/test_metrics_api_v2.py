@@ -13,8 +13,13 @@ from unittest import mock
 
 import datos_simulados
 from history_service import (
+    HistoricalMetricsAuthenticationError,
+    HistoricalMetricsInvalidResponseError,
+    HistoricalMetricsRateLimitError,
     HistoricalMetricsSensorNotFoundError,
     HistoricalMetricsSourceError,
+    HistoricalMetricsUnknownSensorError,
+    HistoricalMetricsUnsupportedSensorError,
 )
 
 
@@ -543,6 +548,43 @@ class MetricsAPIV2ContractTests(unittest.TestCase):
         self.assertEqual(unexpected.get_json()["code"], "internal_error")
         self.assertNotIn("must-not-leak", unexpected.get_data(as_text=True))
         self.assertNotIn("traceback", unexpected.get_data(as_text=True).casefold())
+
+    def test_prtg_provider_error_categories_have_stable_safe_contracts(self) -> None:
+        self.login()
+        cases = (
+            (
+                HistoricalMetricsUnsupportedSensorError("secret=must-not-leak"),
+                400,
+                "sensor_type_unsupported",
+            ),
+            (
+                HistoricalMetricsUnknownSensorError("secret=must-not-leak"),
+                400,
+                "sensor_type_unknown",
+            ),
+            (
+                HistoricalMetricsAuthenticationError("passhash=must-not-leak"),
+                502,
+                "upstream_authentication_error",
+            ),
+            (
+                HistoricalMetricsRateLimitError("token=must-not-leak"),
+                502,
+                "upstream_rate_limited",
+            ),
+            (
+                HistoricalMetricsInvalidResponseError("password=must-not-leak"),
+                502,
+                "upstream_invalid_response",
+            ),
+        )
+        for error, status, code in cases:
+            with self.subTest(code=code):
+                self.source.error = error
+                response = self.query("ping")
+                self.assertEqual(response.status_code, status)
+                self.assertEqual(response.get_json()["code"], code)
+                self.assertNotIn("must-not-leak", response.get_data(as_text=True))
 
     def test_unconfigured_normalized_provider_is_a_502(self) -> None:
         app_without_provider = self.app_module.create_app()
