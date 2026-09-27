@@ -141,6 +141,7 @@ class PRTGDiscoveryTests(unittest.TestCase):
         self.assertEqual(result.sensor.identity.server_id, "srv_discovery_lab_01")
         self.assertEqual(result.sensor.identity.sensor_id, "210001")
         self.assertEqual(result.sensor.prtg_sensor_type, "ping")
+        self.assertEqual(result.sensor.prtg_version, "fixture-0.4A")
         self.assertEqual(result.sensor.declared_channel_count, 3)
         self.assertEqual(
             [channel.canonical_key for channel in result.channels],

@@ -1,7 +1,7 @@
 # Phase 0.4: Real PRTG metrics acquisition
 
 - Status: In progress
-- Current increment: 0.4B implemented against sanitized fixtures
+- Current increment: 0.4C validation procedure prepared; real run pending
 - Real PRTG validation: Pending; no authorized instance was contacted
 - `implementation_complete_with_fixtures: true`
 - `validated_against_real_prtg: false`
@@ -331,20 +331,39 @@ selected sensor. After setting the runtime configuration above:
 .venv/bin/python scripts/prtg_metrics_smoke.py \
   --server-id <configured-stable-id> \
   --sensor-id <selected-prtg-sensor-id> \
+  --expected-family ping \
   --points 3 \
   --confirm-read-only-authorized
 ```
 
-The command refuses to run without the acknowledgement and prints only stable
-identity, family, canonical channel keys, and counts. It does not print URLs,
-credentials, or raw PRTG payloads. A reviewed successful run may change the
-validation marker for the tested version/families; it must not be generalized
-to all PRTG installations.
+The command refuses to run without the acknowledgement, checks the expected
+family before requesting history, and prints only allowlisted structural
+evidence. It aliases source columns and does not print values, names, URLs,
+credentials, or raw PRTG payloads. A successful command deliberately leaves
+`validated_against_real_prtg: false` and `compatibility_status: not_tested`;
+only a reviewed matrix update may promote the tested version/sensor type.
+
+## Phase 0.4C: compatibility validation preparation
+
+The reproducible runbook, fixture baseline, empty real-compatibility matrix,
+localization checklist, security checklist, evidence sanitization procedure,
+parity checks, and declaration gate are maintained in
+`docs/REAL_PRTG_VALIDATION.md`.
+
+No owned or explicitly authorized PRTG instance was supplied for this
+increment. No external server was contacted, all real rows remain
+`not_tested`, and `validated_against_real_prtg` remains `false`.
+
+The preparation audit found one misleading behavior in the Phase 0.4B smoke:
+one successful selected-sensor request emitted a global real-validation flag.
+The smoke now distinguishes successful execution from reviewed compatibility,
+requires the operator's expected family, captures only one historical request,
+and produces sanitized structural evidence for manual review.
 
 ## Remaining Phase 0.4 work
 
-1. Run the opt-in smoke against an owned/authorized PRTG and retain only
-   sanitized, reviewed evidence.
+1. Obtain explicit authorization and run the opt-in smoke sequentially against
+   selected sensors, following `docs/REAL_PRTG_VALIDATION.md`.
 2. Validate installed-version captions, sensor type tokens, locale, DST,
    aggregation, and empty/error rows before promoting additional aliases.
 3. Decide whether production needs a shared multi-process request coordinator

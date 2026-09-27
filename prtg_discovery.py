@@ -96,6 +96,7 @@ class PRTGSensorMetadata:
     identity: SensorIdentity
     name: str
     prtg_sensor_type: str
+    prtg_version: str | None
     device_id: str | None
     device_name: str | None
     probe_name: str | None
@@ -426,6 +427,10 @@ def parse_sensor_metadata(
         ),
         name=name,
         prtg_sensor_type=sensor_type,
+        prtg_version=_clean(
+            payload.get("prtg-version", payload.get("prtg_version")),
+            limit=80,
+        ),
         device_id=device_id,
         device_name=_clean(row.get("device")),
         probe_name=_clean(row.get("probe")),

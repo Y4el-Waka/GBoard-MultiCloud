@@ -77,8 +77,11 @@ class FixturePRTGHTTPServer:
                 return jsonify({"sensors": []})
             sensor_id = str(request.args.get("filter_objid") or "")
             selected = self.by_sensor_id.get(sensor_id)
-            rows = [] if selected is None else selected[1]["sensor_payload"]["sensors"]
-            return jsonify({"sensors": rows})
+            if selected is None:
+                return jsonify({"sensors": []})
+            payload = dict(selected[1]["sensor_payload"])
+            payload["sensors"] = selected[1]["sensor_payload"]["sensors"]
+            return jsonify(payload)
 
         @app.get("/<slug>/api/table.csv")
         def table_csv(slug: str):
@@ -219,6 +222,10 @@ class RealMetricsProviderTests(unittest.TestCase):
                 self.assertEqual(metadata["server_id"], "srv_fixture_a")
                 self.assertEqual(metadata["sensor_type"], family)
                 self.assertEqual(metadata["classification_status"], "supported")
+                self.assertEqual(
+                    metadata["source_prtg_version"],
+                    "fixture-0.4A",
+                )
                 self.assertTrue(metadata["classification_evidence"])
                 self.assertTrue(metadata["channels"])
 

@@ -50,9 +50,11 @@ authentication, invalid response, transport, and local rate budget. Flask
 continues to own HTTP serialization and emits allowlisted messages only.
 
 An explicit manual smoke command requires
-`--confirm-read-only-authorized`, selects one configured server and sensor,
-and prints only a normalized summary. It is never invoked by unittest, CI, or
-application startup.
+`--confirm-read-only-authorized`, a declared expected family, one configured
+server, and one selected sensor. It prints only allowlisted structural
+evidence and never promotes an execution to `validated_against_real_prtg`
+without manual review. It is never invoked by unittest, CI, or application
+startup.
 
 ## Alternatives considered
 

@@ -169,6 +169,8 @@ class RealHistoricalMetricsSource:
             "classification_status": self._classification_status(family),
             "classification_evidence": result.classification.evidence,
             "classification_reason": result.classification.reason,
+            "source_sensor_type": result.sensor.prtg_sensor_type,
+            "source_prtg_version": result.sensor.prtg_version,
             "channels": tuple(
                 {
                     "source_channel_id": channel.source_channel_id,
