@@ -137,3 +137,10 @@ Abrir `http://127.0.0.1:5067`.
 ### Datos y privacidad
 
 El laboratorio usa exclusivamente nombres, direcciones de documentación y métricas sintéticas. No debe incluirse información de producción, clientes, topología, credenciales, históricos o capturas de ambientes reales.
+
+### Laboratorio reproducible con Docker Compose
+
+Docker sigue siendo opcional. Para iniciar simulador, collector y CoreView como
+servicios contenidos, consulta `docs/DOCKER_LAB.md`. La composición publica
+únicamente en loopback, conserva SQLite/snapshot en un volumen nombrado y
+mantiene desactivado el provider PRTG real.
