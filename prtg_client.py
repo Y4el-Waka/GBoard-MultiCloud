@@ -127,6 +127,7 @@ class PRTGClient:
         *,
         params: Mapping[str, Any] | None = None,
         operation: str,
+        allow_redirects: bool | None = None,
     ) -> requests.Response:
         if self._closed:
             raise PRTGClientError("PRTG client is closed")
@@ -144,11 +145,17 @@ class PRTGClient:
                 if not self.verify_ssl:
                     warnings.simplefilter("ignore", InsecureRequestWarning)
 
+                request_options = {
+                    "params": request_params,
+                    "timeout": self.timeout,
+                    "verify": self.verify_ssl,
+                }
+                if allow_redirects is not None:
+                    request_options["allow_redirects"] = allow_redirects
+
                 response = self._session.get(
                     f"{base_url}{endpoint}",
-                    params=request_params,
-                    timeout=self.timeout,
-                    verify=self.verify_ssl,
+                    **request_options,
                 )
         except requests.Timeout:
             self._log_failure(server, operation, "timeout")
@@ -197,12 +204,14 @@ class PRTGClient:
         *,
         params: Mapping[str, Any],
         operation: str,
+        allow_redirects: bool | None = None,
     ) -> dict[str, Any]:
         response = self._request(
             server,
             endpoint,
             params=params,
             operation=operation,
+            allow_redirects=allow_redirects,
         )
 
         try:
@@ -254,6 +263,55 @@ class PRTGClient:
             operation="get_sensors",
         )
 
+    def get_sensor_metadata(
+        self,
+        server: Mapping[str, Any],
+        sensor_id: int | str,
+    ) -> dict[str, Any]:
+        """Return one sensor's read-only table metadata for discovery."""
+        return self._get_json_object(
+            server,
+            "/api/table.json",
+            params={
+                "content": "sensors",
+                "columns": (
+                    "objid,parentid,probe,group,device,sensor,type,tags,"
+                    "interval,status,lastvalue,lastcheck,channel"
+                ),
+                "count": 1,
+                "filter_objid": sensor_id,
+            },
+            operation="get_sensor_metadata",
+            allow_redirects=False,
+        )
+
+    def get_channels_csv(
+        self,
+        server: Mapping[str, Any],
+        sensor_id: int | str,
+    ) -> str:
+        """Return channel rows without JSON's volume/speed key collision."""
+        response = self._request(
+            server,
+            "/api/table.csv",
+            params={
+                "id": sensor_id,
+                "content": "channels",
+                "columns": "objid,name,lastvalue_",
+                "count": 500,
+            },
+            operation="get_channels_csv",
+            allow_redirects=False,
+        )
+        text = response.text
+        if not isinstance(text, str):
+            self._log_failure(server, "get_channels_csv", "invalid text response")
+            raise PRTGResponseError(
+                f"PRTG returned invalid text for server "
+                f"'{self._server_name(server)}'"
+            )
+        return text
+
     def get_historic_csv(
         self,
         server: Mapping[str, Any],
@@ -262,6 +320,7 @@ class PRTGClient:
         end: datetime | str,
         *,
         average_seconds: int,
+        allow_redirects: bool | None = None,
     ) -> str:
         response = self._request(
             server,
@@ -274,6 +333,7 @@ class PRTGClient:
                 "usecaption": 1,
             },
             operation="get_historic_csv",
+            allow_redirects=allow_redirects,
         )
         text = response.text
 

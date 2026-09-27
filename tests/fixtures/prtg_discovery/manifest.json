@@ -1,0 +1,162 @@
+{
+  "evidence": "sanitized_local_fixture",
+  "validated_against_real_prtg": false,
+  "server": {
+    "id": "srv_discovery_lab_01",
+    "name": "PRTG Discovery Lab"
+  },
+  "cases": {
+    "ping": {
+      "sensor_payload": {
+        "prtg-version": "fixture-0.4A",
+        "sensors": [{
+          "objid": 210001,
+          "parentid": 310001,
+          "probe": "LAB-PROBE",
+          "group": "Synthetic Network",
+          "device": "LAB-DEVICE-01",
+          "sensor": "Round Trip Monitor",
+          "type": "ping",
+          "tags": "pingsensor synthetic",
+          "interval": "60 s",
+          "status": "Up",
+          "lastvalue": "14.5 ms",
+          "lastcheck": "2026-09-26 12:10:00",
+          "channel": 3
+        }]
+      },
+      "channels": "channels_ping.csv",
+      "history": "history_ping.csv"
+    },
+    "cpu": {
+      "sensor_payload": {
+        "prtg-version": "fixture-0.4A",
+        "sensors": [{
+          "objid": 210002,
+          "parentid": 310002,
+          "probe": "LAB-PROBE",
+          "group": "Synthetic Compute",
+          "device": "LAB-DEVICE-02",
+          "sensor": "Processor Monitor",
+          "type": "snmpcpu",
+          "tags": "snmpcpuloadsensor synthetic",
+          "interval": "60 s",
+          "status": "Up",
+          "lastvalue": "42 %",
+          "lastcheck": "2026-09-26 12:10:00",
+          "channel": 1
+        }]
+      },
+      "channels": "channels_cpu.csv",
+      "history": "history_cpu.csv"
+    },
+    "memory": {
+      "sensor_payload": {
+        "prtg-version": "fixture-0.4A",
+        "sensors": [{
+          "objid": 210003,
+          "parentid": 310003,
+          "probe": "LAB-PROBE",
+          "group": "Synthetic Compute",
+          "device": "LAB-DEVICE-03",
+          "sensor": "Memory Monitor",
+          "type": "snmpmemory",
+          "tags": "memorysensor synthetic",
+          "interval": "60 s",
+          "status": "Up",
+          "lastvalue": "61 %",
+          "lastcheck": "2026-09-26 12:10:00",
+          "channel": 2
+        }]
+      },
+      "channels": "channels_memory.csv",
+      "history": "history_memory.csv"
+    },
+    "traffic": {
+      "sensor_payload": {
+        "prtg-version": "fixture-0.4A",
+        "sensors": [{
+          "objid": 210004,
+          "parentid": 310004,
+          "probe": "LAB-PROBE",
+          "group": "Synthetic Network",
+          "device": "LAB-DEVICE-04",
+          "sensor": "Interface Monitor",
+          "type": "snmptraffic",
+          "tags": "bandwidthsensor synthetic",
+          "interval": "60 s",
+          "status": "Up",
+          "lastvalue": "85 Mbit/s",
+          "lastcheck": "2026-09-26 12:10:00",
+          "channel": 3
+        }]
+      },
+      "channels": "channels_traffic.csv",
+      "history": "history_traffic.csv"
+    },
+    "sfp": {
+      "sensor_payload": {
+        "prtg-version": "fixture-0.4A",
+        "sensors": [{
+          "objid": 210005,
+          "parentid": 310005,
+          "probe": "LAB-PROBE",
+          "group": "Synthetic Optical",
+          "device": "LAB-DEVICE-05",
+          "sensor": "Transceiver Diagnostics",
+          "type": "snmpcustomadvanced",
+          "tags": "optical synthetic",
+          "interval": "300 s",
+          "status": "Up",
+          "lastvalue": "-3.2 dBm",
+          "lastcheck": "2026-09-26 12:10:00",
+          "channel": 5
+        }]
+      },
+      "channels": "channels_sfp.csv",
+      "history": "history_sfp.csv"
+    },
+    "unknown": {
+      "sensor_payload": {
+        "prtg-version": "fixture-0.4A",
+        "sensors": [{
+          "objid": 210006,
+          "parentid": 310006,
+          "probe": "LAB-PROBE",
+          "group": "Synthetic Custom",
+          "device": "LAB-DEVICE-06",
+          "sensor": "Custom Monitor",
+          "type": "snmpcustomadvanced",
+          "tags": "customsensor synthetic",
+          "interval": "300 s",
+          "status": "Up",
+          "lastvalue": "7 #",
+          "lastcheck": "2026-09-26 12:10:00",
+          "channel": 1
+        }]
+      },
+      "channels": "channels_unknown.csv"
+    },
+    "unsupported": {
+      "sensor_payload": {
+        "prtg-version": "fixture-0.4A",
+        "sensors": [{
+          "objid": 210007,
+          "parentid": 310007,
+          "probe": "LAB-PROBE",
+          "group": "Synthetic Web",
+          "device": "LAB-DEVICE-07",
+          "sensor": "Web Endpoint",
+          "type": "http",
+          "tags": "httpsensor synthetic",
+          "interval": "60 s",
+          "status": "Up",
+          "lastvalue": "120 ms",
+          "lastcheck": "2026-09-26 12:10:00",
+          "channel": 1
+        }]
+      },
+      "channels": "channels_unknown.csv"
+    }
+  }
+}

@@ -194,6 +194,38 @@ class PRTGClientTests(unittest.TestCase):
         self.assertTrue(url.endswith("/api/table.json"))
         self.assertEqual(options["params"]["content"], "sensors")
         self.assertIn("lastvalue", options["params"]["columns"])
+        self.assertNotIn("allow_redirects", options)
+
+    def test_read_only_discovery_requests_disable_redirects(self) -> None:
+        metadata_session = RecordingSession(
+            FakeResponse(payload={"sensors": [{"objid": 100001}]})
+        )
+        channels_session = RecordingSession(
+            FakeResponse(text='"ID";"Name";"Last Value"\n1;"Ping Time";"10 ms"\n')
+        )
+
+        metadata = self.client(metadata_session).get_sensor_metadata(
+            self.password_server,
+            100001,
+        )
+        channels = self.client(channels_session).get_channels_csv(
+            self.password_server,
+            100001,
+        )
+
+        metadata_url, metadata_options = metadata_session.calls[0]
+        channels_url, channels_options = channels_session.calls[0]
+        self.assertEqual(metadata["sensors"][0]["objid"], 100001)
+        self.assertIn("Ping Time", channels)
+        self.assertTrue(metadata_url.endswith("/api/table.json"))
+        self.assertEqual(metadata_options["params"]["content"], "sensors")
+        self.assertEqual(metadata_options["params"]["filter_objid"], 100001)
+        self.assertEqual(metadata_options["params"]["count"], 1)
+        self.assertFalse(metadata_options["allow_redirects"])
+        self.assertTrue(channels_url.endswith("/api/table.csv"))
+        self.assertEqual(channels_options["params"]["content"], "channels")
+        self.assertEqual(channels_options["params"]["id"], 100001)
+        self.assertFalse(channels_options["allow_redirects"])
 
     def test_historic_request_returns_source_csv(self) -> None:
         csv_text = "Date Time;Ping Time\n2026-09-23 12:00:00;10 ms\n"
@@ -214,6 +246,21 @@ class PRTGClientTests(unittest.TestCase):
         self.assertEqual(options["params"]["edate"], "2026-09-23-12-00-00")
         self.assertEqual(options["params"]["avg"], 300)
         self.assertEqual(options["params"]["usecaption"], 1)
+        self.assertNotIn("allow_redirects", options)
+
+    def test_historic_request_can_disable_redirects_for_discovery(self) -> None:
+        session = RecordingSession(FakeResponse(text="Date Time;Ping Time\n"))
+
+        self.client(session).get_historic_csv(
+            self.password_server,
+            100001,
+            "2026-09-23-11-00-00",
+            "2026-09-23-12-00-00",
+            average_seconds=300,
+            allow_redirects=False,
+        )
+
+        self.assertFalse(session.calls[0][1]["allow_redirects"])
 
     def test_pause_temporary_indefinite_and_resume(self) -> None:
         session = RecordingSession(FakeResponse())
