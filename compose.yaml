@@ -38,7 +38,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: coreview-cloud-lab:0.5a
+    image: coreview-cloud-lab:0.5b
     command:
       - gunicorn
       - --bind
@@ -76,7 +76,7 @@ services:
 
   collector:
     <<: *common-security
-    image: coreview-cloud-lab:0.5a
+    image: coreview-cloud-lab:0.5b
     pull_policy: never
     command: ["python", "-u", "monitor.py"]
     network_mode: service:simulator
@@ -97,7 +97,7 @@ services:
 
   app:
     <<: *common-security
-    image: coreview-cloud-lab:0.5a
+    image: coreview-cloud-lab:0.5b
     pull_policy: never
     command:
       - gunicorn

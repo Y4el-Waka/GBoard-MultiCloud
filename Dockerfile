@@ -1,4 +1,9 @@
-FROM python:3.12-slim-bookworm
+FROM python:3.12-slim-bookworm@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e
+
+LABEL org.opencontainers.image.title="CoreView Cloud Lab" \
+      org.opencontainers.image.version="0.5b" \
+      org.opencontainers.image.base.name="docker.io/library/python:3.12-slim-bookworm" \
+      org.opencontainers.image.base.digest="sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -11,8 +16,11 @@ RUN addgroup --system --gid 10001 coreview \
     && adduser --system --uid 10001 --ingroup coreview --home /nonexistent \
         --no-create-home coreview
 
-COPY requirements.txt ./requirements.txt
-RUN python -m pip install --no-cache-dir --requirement requirements.txt
+COPY requirements.lock ./requirements.lock
+RUN python -m pip install --no-cache-dir --require-hashes \
+        --requirement requirements.lock \
+    && python -m pip uninstall --yes pip \
+    && rm -rf /root/.cache /usr/local/bin/pip*
 
 COPY --chown=10001:10001 *.py ./
 COPY --chown=10001:10001 metrics ./metrics

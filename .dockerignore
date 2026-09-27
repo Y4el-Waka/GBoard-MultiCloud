@@ -23,6 +23,8 @@ docs
 htmlcov
 .coverage
 .pytest_cache
+artifacts
+.cache
 
 .DS_Store
 .idea

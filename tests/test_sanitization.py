@@ -58,10 +58,8 @@ def git_lines(*args: str) -> list[str]:
 
 
 def tracked_text_files() -> list[Path]:
-    relative_names = set(git_lines("ls-files"))
-    relative_names.update(
-        str(path.relative_to(REPO_ROOT))
-        for path in (REPO_ROOT / "tests").glob("*.py")
+    relative_names = set(
+        git_lines("ls-files", "--cached", "--others", "--exclude-standard")
     )
     files = []
 

@@ -4,6 +4,11 @@ Phase 0.5A packages the existing synthetic CoreView laboratory without changing
 the legacy APIs, metrics contracts, collector, simulator semantics, or
 frontend. It is intended for local development and demonstrations only.
 
+Phase 0.5B fixes the base image and Python artifacts, adds CI, CycloneDX SBOM,
+Trivy scanning, and measured resource evidence. See
+`docs/CONTAINER_SUPPLY_CHAIN.md` for the exact digests, policy, and update
+procedure.
+
 ## Prerequisites
 
 - Docker Engine 24 or newer;
@@ -123,6 +128,14 @@ It verifies:
 
 It accepts only loopback application/simulator URLs and disables proxy use.
 Missing components produce a nonzero exit with the failed boundary.
+
+Generate the SBOM and vulnerability evidence after the image is built:
+
+```bash
+bash scripts/container_supply_chain.sh artifacts/container
+```
+
+The artifacts are local/CI outputs and are intentionally ignored by Git.
 
 ### Phase 0.5A execution record
 
@@ -248,9 +261,10 @@ unrelated Docker volumes.
 - SQLite remains single-host laboratory persistence.
 - Simulator logical state is not durable.
 - Frontend CDN dependencies may prevent first-load charts in an offline
-  browser; no UI asset vendoring was performed in this phase.
+  browser. Phase 0.5B audits and freezes their URL allowlist but does not vendor
+  them; browser-offline operation is not claimed.
 - No normalized-history persistence, counter-to-rate processing, Redis,
   PostgreSQL, Kubernetes, or cloud resources were added.
-- Resource consumption has not been benchmarked; use
-  `docker stats --no-stream` to measure the actual host rather than relying on
-  an estimate.
+- Phase 0.5B measured approximately 116.25 MiB total during its smoke sample.
+  These short point samples are documented in `CONTAINER_SUPPLY_CHAIN.md`; no
+  resource limits were set without an isolated soak test.
