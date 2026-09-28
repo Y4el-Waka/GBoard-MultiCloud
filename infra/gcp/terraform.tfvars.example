@@ -1,0 +1,15 @@
+# Copy to ignored terraform.tfvars. Never commit real project identifiers.
+project_id          = "replace-with-authorized-project-id"
+allowed_project_ids = ["replace-with-authorized-project-id"]
+
+# Supply an approved, non-overlapping RFC1918 /24 through /28 CIDR.
+subnet_cidr = "replace-with-approved-rfc1918-subnet-cidr"
+
+# Resolve and review a specific Debian 12 x86_64 image before a real plan.
+# Image family references are deliberately rejected.
+boot_image = "projects/debian-cloud/global/images/replace-with-pinned-debian-12-image"
+
+# Prefer the full 40-character Git SHA whose image CI validated.
+image_tag = "replace-with-reviewed-full-git-sha"
+
+logical_owner = "coreview-lab"

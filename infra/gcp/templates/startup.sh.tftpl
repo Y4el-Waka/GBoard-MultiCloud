@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly install_root="/opt/coreview"
+readonly compose_plugin="/usr/local/lib/docker/cli-plugins/docker-compose"
+readonly runtime_disk="/dev/disk/by-id/google-${runtime_disk_device}"
+readonly docker_root="/var/lib/docker"
+readonly bootstrap_marker="$install_root/.bootstrap-${bootstrap_revision}-complete"
+
+if [[ -f "$bootstrap_marker" ]]; then
+  echo "CoreView host bootstrap revision ${bootstrap_revision} already completed."
+  exit 0
+fi
+
+export DEBIAN_FRONTEND=noninteractive
+while IFS= read -r -d '' source_file; do
+  sed -i \
+    -e 's|http://deb.debian.org|https://deb.debian.org|g' \
+    -e 's|http://security.debian.org|https://security.debian.org|g' \
+    "$source_file"
+done < <(find /etc/apt -type f \( -name '*.list' -o -name '*.sources' \) -print0)
+apt-get update
+apt-get install --yes --no-install-recommends ca-certificates curl docker.io openssl python3
+
+systemctl stop docker.service docker.socket || true
+
+for attempt in $(seq 1 60); do
+  if [[ -b "$runtime_disk" ]]; then
+    break
+  fi
+  if [[ "$attempt" -eq 60 ]]; then
+    echo "Runtime disk did not appear; refusing to continue bootstrap." >&2
+    exit 1
+  fi
+  sleep 1
+done
+
+if ! blkid "$runtime_disk" >/dev/null 2>&1; then
+  mkfs.ext4 -F -L coreview-runtime "$runtime_disk"
+fi
+
+install -d -m 0711 "$docker_root"
+runtime_uuid="$(blkid -s UUID -o value "$runtime_disk")"
+if ! grep -Fq "UUID=$runtime_uuid " /etc/fstab; then
+  printf 'UUID=%s %s ext4 defaults,nodev,nosuid 0 2\n' "$runtime_uuid" "$docker_root" >> /etc/fstab
+fi
+if ! mountpoint --quiet "$docker_root"; then
+  mount "$docker_root"
+fi
+
+install -d -m 0755 /etc/systemd/system/docker.service.d
+cat > /etc/systemd/system/docker.service.d/coreview-runtime.conf <<'DOCKER_MOUNT_UNIT'
+[Unit]
+RequiresMountsFor=/var/lib/docker
+After=var-lib-docker.mount
+DOCKER_MOUNT_UNIT
+
+install -d -m 0755 "$(dirname "$compose_plugin")" "$install_root/bin"
+curl --fail --silent --show-error --location \
+  "https://github.com/docker/compose/releases/download/v${docker_compose_version}/docker-compose-linux-x86_64" \
+  --output "$compose_plugin"
+printf '%s  %s\n' '${docker_compose_sha256}' "$compose_plugin" | sha256sum --check --status
+chmod 0755 "$compose_plugin"
+
+printf '%s' '${compose_config_b64}' | base64 --decode > "$install_root/compose.yaml"
+printf '%s' '${servers_config_b64}' | base64 --decode > "$install_root/servers.synthetic.json"
+chown root:root "$install_root/compose.yaml" "$install_root/servers.synthetic.json"
+chmod 0644 "$install_root/compose.yaml" "$install_root/servers.synthetic.json"
+
+cat > "$install_root/bin/pull-and-start" <<'PULL_AND_START'
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly registry_host='${registry_host}'
+readonly image_uri='${image_uri}'
+docker_config="$(mktemp -d /run/coreview-docker-config.XXXXXX)"
+cleanup() {
+  docker --config "$docker_config" logout "$registry_host" >/dev/null 2>&1 || true
+  rm -rf -- "$docker_config"
+}
+trap cleanup EXIT
+
+access_token="$(
+  curl --fail --silent --show-error --max-redirs 0 \
+    --header 'Metadata-Flavor: Google' \
+    'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token' \
+    | python3 -c 'import json, sys; print(json.load(sys.stdin)["access_token"])'
+)"
+printf '%s' "$access_token" \
+  | docker --config "$docker_config" login --username oauth2accesstoken --password-stdin "$registry_host" >/dev/null
+unset access_token
+
+docker --config "$docker_config" pull "$image_uri"
+docker compose --env-file /opt/coreview/.env --file /opt/coreview/compose.yaml \
+  up --detach --wait --wait-timeout 180 --pull never
+PULL_AND_START
+chmod 0755 "$install_root/bin/pull-and-start"
+
+cat > "$install_root/bin/initialize-lab-secrets" <<'INITIALIZE_SECRETS'
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+
+if [[ "$EUID" -ne 0 ]]; then
+  exec sudo -- "$0" "$@"
+fi
+
+readonly env_file="/opt/coreview/.env"
+if [[ -e "$env_file" ]]; then
+  echo "Refusing to overwrite existing runtime secrets: $env_file" >&2
+  exit 1
+fi
+
+read -r -s -p "Synthetic lab admin password (16+ characters; letters, digits, dot, underscore or hyphen): " admin_password
+printf '\n'
+if (( $${#admin_password} < 16 )); then
+  echo "Password is shorter than 16 characters; no file was written." >&2
+  unset admin_password
+  exit 1
+fi
+if [[ ! "$admin_password" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "Password contains a character unsafe for the Compose JSON environment contract; no file was written." >&2
+  unset admin_password
+  exit 1
+fi
+
+app_secret="$(openssl rand -hex 32)"
+{
+  printf 'COREVIEW_LAB_APP_SECRET=%s\n' "$app_secret"
+  printf 'COREVIEW_LAB_ADMIN_PASSWORD=%s\n' "$admin_password"
+} > "$${env_file}.tmp"
+chown root:root "$${env_file}.tmp"
+chmod 0600 "$${env_file}.tmp"
+mv "$${env_file}.tmp" "$env_file"
+unset app_secret admin_password
+
+systemctl start coreview-lab.service
+echo "Runtime secrets created and CoreView startup requested."
+INITIALIZE_SECRETS
+chmod 0755 "$install_root/bin/initialize-lab-secrets"
+
+cat > /etc/systemd/system/coreview-lab.service <<'SYSTEMD_UNIT'
+[Unit]
+Description=CoreView Cloud Lab synthetic Docker Compose stack
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+ConditionPathExists=/opt/coreview/.env
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/coreview
+ExecStart=/opt/coreview/bin/pull-and-start
+ExecStop=/usr/bin/docker compose --env-file /opt/coreview/.env --file /opt/coreview/compose.yaml down --remove-orphans
+TimeoutStartSec=300
+TimeoutStopSec=90
+
+[Install]
+WantedBy=multi-user.target
+SYSTEMD_UNIT
+
+systemctl daemon-reload
+systemctl enable --now docker.service
+systemctl enable coreview-lab.service
+install -m 0600 /dev/null "$bootstrap_marker"
+
+echo "CoreView host bootstrap complete; publish the reviewed image, then initialize runtime secrets through an authorized IAP/OS Login shell."
