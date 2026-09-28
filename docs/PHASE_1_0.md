@@ -14,7 +14,8 @@ terraform_plan_result: 16_add_0_change_0_destroy
 state_backend_bootstrap_prepared: true
 state_backend_created: true
 definitive_remote_plan: 16_add_0_change_0_destroy
-first_deployment_readiness: pending_ci_image_budget_and_clean_commit
+release_gate_documented: true
+first_deployment_readiness: pending_remote_ci_image_equivalence_and_budget
 terraform_apply_executed: false
 aws_resources_created: false
 image_published_to_ecr: false

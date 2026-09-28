@@ -239,6 +239,25 @@ class AWSTerraformPreparationTests(unittest.TestCase):
         self.assertNotIn("terraform apply -auto-approve", runbook)
         self.assertNotRegex(runbook, r"\b\d{12}\b")
 
+    def test_release_gate_documents_evidence_without_enabling_publication(self) -> None:
+        release_gate = read("RELEASE_GATE.md")
+        workflow = (
+            REPO_ROOT / ".github/workflows/container-ci.yml"
+        ).read_text(encoding="utf-8")
+        for contract in (
+            "coreview-container-evidence",
+            "image-inspect.json",
+            "{Id,Os,Architecture,Variant,Config,RootFS}",
+            "Controlled CI image export",
+            "Manual CI-to-ECR publication with OIDC",
+            "terraform plan -lock=false",
+            "Full 40-character release SHA",
+        ):
+            self.assertIn(contract, release_gate)
+        self.assertNotIn("id-token: write", workflow)
+        self.assertNotIn("docker image save", workflow)
+        self.assertNotIn("docker push", workflow)
+
     def test_frontend_and_application_runtime_files_are_untouched_by_terraform(self) -> None:
         changed = subprocess.run(
             ["git", "diff", "--name-only", "--", "app.py", "monitor.py", "templates", "static"],
