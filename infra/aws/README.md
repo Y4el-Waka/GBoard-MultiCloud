@@ -68,4 +68,5 @@ No command in Phase 1.0A invokes `terraform apply` or `terraform destroy`.
 | `ami_id_override` | Pin after the first plan resolves the official AL2023 parameter |
 
 See `DEPLOYMENT_RUNBOOK.md`, `DESTROY_RUNBOOK.md` and `COST_ESTIMATE.md` before
-any later deployment.
+any later deployment. `STATE_BACKEND.md` defines the separate, explicitly
+approved S3 backend bootstrap, least-privilege access and recovery procedure.

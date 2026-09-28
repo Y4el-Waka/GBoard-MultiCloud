@@ -68,3 +68,18 @@ provides monitoring and notifications, and AWS documents the creation flow in
 [Creating a cost budget](https://docs.aws.amazon.com/cost-management/latest/userguide/create-cost-budget.html).
 Budget data updates periodically; an alert is not a transaction-level control
 and does not stop or cap spending.
+
+## External state backend
+
+The workload estimate and state-backend cost have different lifecycles. S3
+Standard storage in `us-east-1` is approximately $0.023 per retained GiB-month,
+plus GET, PUT, LIST and lifecycle request charges. A small Terraform state and a
+limited number of versions will usually remain below one cent per month, but no
+fixed cost is asserted because state size, update frequency and version count
+are operational variables.
+
+The bucket and its noncurrent versions survive workload `terraform destroy`.
+The reviewed backend policy retains noncurrent state and lock-file versions for
+90 days and aborts incomplete multipart uploads after seven days; it never
+expires the current state automatically. See `STATE_BACKEND.md` for independent
+retention, recovery and cleanup procedures.

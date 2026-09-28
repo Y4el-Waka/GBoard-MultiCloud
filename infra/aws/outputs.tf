@@ -16,6 +16,7 @@ output "resolved_ami_id" {
 output "ecr_repository_url" {
   description = "Private ECR repository for the reviewed CoreView image."
   value       = aws_ecr_repository.coreview.repository_url
+  sensitive   = true
 }
 
 output "vpc_id" {

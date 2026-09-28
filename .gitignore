@@ -39,6 +39,8 @@ backend.hcl
 crash.log
 crash.*.log
 *.tfplan
+*.plan
+plan.out
 
 # OS / editor
 .DS_Store

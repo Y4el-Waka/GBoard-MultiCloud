@@ -159,11 +159,52 @@ class AWSTerraformPreparationTests(unittest.TestCase):
         gitignore = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
         backend = read("backend.tf")
         backend_example = read("backend.example.hcl")
-        for ignored in (".terraform/", "*.tfstate", "*.tfvars", "backend.hcl", "*.tfplan"):
+        for ignored in (
+            ".terraform/",
+            "*.tfstate",
+            "*.tfvars",
+            "backend.hcl",
+            "*.tfplan",
+            "*.plan",
+            "plan.out",
+        ):
             self.assertIn(ignored, gitignore)
         self.assertIn('backend "s3" {}', backend)
         self.assertIn("use_lockfile = true", backend_example)
         self.assertIn("encrypt      = true", backend_example)
+
+    def test_state_backend_bootstrap_is_explicit_and_hardened(self) -> None:
+        script_path = AWS_ROOT / "scripts" / "bootstrap_state_backend.sh"
+        self.assertTrue(script_path.is_file())
+        script = script_path.read_text(encoding="utf-8")
+        for contract in (
+            "COREVIEW_STATE_BACKEND_APPROVED",
+            "--check",
+            "--execute",
+            "--expected-bucket-owner",
+            "put-public-access-block",
+            "BucketOwnerEnforced",
+            '"SSEAlgorithm": "AES256"',
+            "put-bucket-versioning",
+            "DenyInsecureTransport",
+            "aws:SecureTransport",
+            "NoncurrentDays",
+            "DaysAfterInitiation",
+        ):
+            self.assertIn(contract, script)
+        self.assertIn('[[ "$presence" == "absent" ]]', script)
+        self.assertIn("refusing to create, adopt or modify", script)
+        self.assertNotRegex(script, r"\b\d{12}\b")
+
+    def test_ecr_repository_url_is_suppressed_from_normal_output(self) -> None:
+        outputs = read("outputs.tf")
+        block = re.search(
+            r'output "ecr_repository_url" \{(?P<body>.*?)\n\}',
+            outputs,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(block)
+        self.assertIn("sensitive   = true", block.group("body"))
 
     def test_required_inputs_prevent_implicit_account_network_or_image(self) -> None:
         variables = read("variables.tf")
@@ -178,6 +219,25 @@ class AWSTerraformPreparationTests(unittest.TestCase):
             self.assertNotIn("default", block.group("body"), variable)
         self.assertIn("allowed_account_ids = var.allowed_account_ids", providers)
         self.assertIn("cidrsubnet(var.vpc_cidr, 8, 0)", read("networking.tf"))
+
+    def test_first_deployment_runbook_has_explicit_gates_and_no_auto_apply(self) -> None:
+        runbook = read("DEPLOYMENT_RUNBOOK.md")
+        for contract in (
+            "Approval A",
+            "Approval B",
+            "Approval C",
+            "Approval D",
+            "Approval E",
+            "Approval F",
+            'terraform apply "$PLAN_FILE"',
+            'docker push "$remote_ref"',
+            "initialize-lab-secrets",
+            "scripts/docker_lab_smoke.py",
+            "DESTROY_RUNBOOK.md",
+        ):
+            self.assertIn(contract, runbook)
+        self.assertNotIn("terraform apply -auto-approve", runbook)
+        self.assertNotRegex(runbook, r"\b\d{12}\b")
 
     def test_frontend_and_application_runtime_files_are_untouched_by_terraform(self) -> None:
         changed = subprocess.run(

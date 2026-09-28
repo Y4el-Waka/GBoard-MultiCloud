@@ -2,23 +2,30 @@
 
 ## Status
 
-Phase 1.0A is implementation-ready and plan-only.
+Phase 1.0B.3 is readiness-reviewed; the first deployment is not yet approved.
 
 ```text
 terraform_configuration_prepared: true
 terraform_fmt: passed
 terraform_init_backend_false: passed
 terraform_validate: passed
-terraform_plan_with_authorized_profile: false
+terraform_plan_with_authorized_profile: true
+terraform_plan_result: 16_add_0_change_0_destroy
+state_backend_bootstrap_prepared: true
+state_backend_created: true
+definitive_remote_plan: 16_add_0_change_0_destroy
+first_deployment_readiness: pending_ci_image_budget_and_clean_commit
 terraform_apply_executed: false
 aws_resources_created: false
 image_published_to_ecr: false
 validated_against_real_prtg: false
 ```
 
-No AWS account was contacted while preparing this phase. The current user
-baseline reports Phase 0.5 closed with remote CI validated; the application,
-collector, simulator, APIs and frontend are unchanged by Phase 1.0A.
+Phase 1.0B.0 completed an authorized read-only preflight and plan in
+`us-east-1`; identifiers remain outside version control. Phase 1.0B.1 prepared the separate S3 state backend and Phase 1.0B.2
+produced the reviewed remote-backend plan. Phase 1.0B.3 audits the first
+deployment sequence without applying it. The application,
+collector, simulator, APIs and frontend remain unchanged.
 
 ## Architecture
 
@@ -118,6 +125,9 @@ sensitive operational artifacts.
 
 HashiCorp recommends bucket versioning for recovery and documents native S3
 locking in the [S3 backend documentation](https://developer.hashicorp.com/terraform/language/backend/s3).
+The reproducible bootstrap, least-privilege policies, 90-day noncurrent-version
+retention, recovery and independent cleanup are documented in
+`infra/aws/STATE_BACKEND.md`.
 
 ## Runtime secrets
 
