@@ -71,6 +71,20 @@ jobs:
       - name: Run full synthetic smoke
         run: python scripts/docker_lab_smoke.py
 
+      - name: Run bounded API burst under resource limits
+        run: |
+          python scripts/docker_lab_burst.py \
+            --requests 180 \
+            --workers 6 \
+            --output artifacts/resource-limits/burst.json
+
+      - name: Run restricted resource soak
+        run: |
+          python scripts/docker_lab_soak.py \
+            --duration 300 \
+            --interval 15 \
+            --output artifacts/resource-limits/soak
+
       - name: Run browser smoke without external network
         run: scripts/run_offline_frontend_smoke.sh
 

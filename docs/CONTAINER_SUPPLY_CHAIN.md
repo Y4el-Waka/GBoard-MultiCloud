@@ -177,11 +177,12 @@ required for exposure, reachability, and unfixed base-image risk.
 6. compile, diff, and Compose validation;
 7. destructive cleanup of only this job's prior Compose volumes;
 8. Docker build and health-gated startup;
-9. full API smoke and external-network-blocked Chromium smoke;
-10. persistence restart smoke and resource snapshot;
-11. CycloneDX SBOM and complete Trivy report;
-12. upload of container/browser evidence for 14 days;
-13. unconditional Compose volume cleanup.
+9. full API smoke, bounded API burst, and five-minute restricted soak;
+10. external-network-blocked Chromium smoke;
+11. persistence restart smoke and resource snapshot;
+12. CycloneDX SBOM and complete Trivy report;
+13. upload of container/browser/resource evidence for 14 days;
+14. unconditional Compose volume cleanup.
 
 The workflow does not push images, access production secrets, contact real
 PRTG, or deploy cloud resources. GitHub-hosted execution has not been observed
@@ -265,12 +266,43 @@ Total memory averaged 125.061 MiB, with p95 138.55 MiB and maximum
 with nearly flat first/last readings and are not sufficient evidence of a
 leak over one hour.
 
-No CPU or memory limits are enforced yet. Evidence-based candidate ceilings
-for a later constrained validation are app 128 MiB/1 CPU, collector
-96 MiB/1 CPU, and simulator 128 MiB/1 CPU. These provide at least twice the
-observed per-service memory maxima and more than the observed CPU peaks, but
-they must pass clean startup, smoke, and a burst/soak run before being added to
-Compose. The raw evidence is generated under `artifacts/soak/` and remains an
+Phase 0.5D accepted the evidence-based ceilings after a clean-volume startup,
+full smoke, controlled burst, restricted soak, offline browser smoke, and
+persistence restart:
+
+| Service | CPU limit | Memory limit | 0.5C maximum | Restricted maximum | Restricted memory headroom |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| app | 1 CPU | 128 MiB | 64.04 MiB | 49.88 MiB | 61.0% |
+| collector | 1 CPU | 96 MiB | 43.86 MiB | 29.17 MiB | 69.6% |
+| simulator | 1 CPU | 128 MiB | 60.75 MiB | 43.16 MiB | 66.3% |
+
+Docker inspection confirmed `NanoCpus=1000000000` for each service and memory
+limits of 134,217,728, 100,663,296, and 134,217,728 bytes respectively. The
+shared network namespace and loopback-only provider policy are unchanged.
+
+The clean-volume cold start reached all healthchecks in 17.54 seconds on the
+validation host (the image build reused already validated layers). The
+controlled burst issued 180 mixed health, snapshot, metadata, normalized
+history, and legacy-history requests with six workers: 180 succeeded, zero
+failed, throughput was 63.253 requests/s, latency p95 was 9.372 ms, and maximum
+latency was 35.968 ms.
+
+The restricted soak lasted 302.198 seconds with 19 samples at a nominal
+15-second interval. All samples preserved 13 servers, 1,000 sensors, zero
+collector errors, healthy containers, zero OOM events, and zero restarts.
+Snapshot age remained below 4.904 seconds.
+
+| Service | CPU mean | CPU p95/max | Memory mean | Memory p95/max | First → last |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| app | 2.847% | 26.74% | 48.631 MiB | 49.88 MiB | 48.81 → 48.61 MiB |
+| collector | 3.812% | 25.83% | 27.978 MiB | 29.17 MiB | 27.60 → 29.17 MiB |
+| simulator | 4.268% | 28.88% | 41.819 MiB | 43.16 MiB | 41.94 → 41.30 MiB |
+
+With only 19 samples the nearest-rank p95 equals the maximum and short-window
+linear slopes are not meaningful leak evidence. The earlier one-hour run
+remains the memory-growth reference; the restricted run proves the chosen
+ceilings do not break the representative laboratory acceptance sequence.
+Raw evidence is written beneath `artifacts/resource-limits/` and remains an
 ignored local/CI artifact.
 
 ## Update procedure

@@ -178,8 +178,39 @@ The completed Phase 0.5C run lasted 3,602.188 seconds and collected 114 real
 samples. All services stayed healthy with zero restarts/OOM events and the
 13/1,000/zero-error contract held throughout. Total memory averaged
 125.061 MiB (p95 138.55 MiB, max 150.41 MiB). Detailed per-service CPU,
-memory, slopes, and the deliberately unenforced candidate limits are recorded
+memory, slopes, and the Phase 0.5D limit decision are recorded
 in `docs/CONTAINER_SUPPLY_CHAIN.md`.
+
+### Resource limits and acceptance sequence
+
+Compose enforces the measured laboratory ceilings:
+
+| Service | CPU | Memory |
+| --- | ---: | ---: |
+| simulator | 1 CPU | 128 MiB |
+| collector | 1 CPU | 96 MiB |
+| app | 1 CPU | 128 MiB |
+
+Run the bounded acceptance workload after a clean, health-gated startup:
+
+```bash
+.venv/bin/python scripts/docker_lab_smoke.py
+.venv/bin/python scripts/docker_lab_burst.py \
+  --requests 180 \
+  --workers 6 \
+  --output artifacts/resource-limits/burst.json
+.venv/bin/python scripts/docker_lab_soak.py \
+  --duration 300 \
+  --interval 15 \
+  --output artifacts/resource-limits/soak
+```
+
+The burst accepts only loopback application/simulator destinations, discovers
+synthetic IDs, caps requests at 1,000 and workers at 32, and stores no session
+cookie or password in its report. It mixes health, snapshot, metadata, all five
+normalized families, and legacy history without performing mass history
+queries. The soak records the actual Docker-enforced state, health, resources,
+restarts, OOM flags, snapshot freshness, and collector contract.
 
 ### Phase 0.5A execution record
 
@@ -306,6 +337,9 @@ unrelated Docker volumes.
 - Simulator logical state is not durable.
 - Browser runtime is offline-capable, but a cold image/npm build still needs
   its pinned artifacts or an explicitly managed trusted cache.
+- Resource ceilings are validated for this exact 13-server/1,000-sensor
+  synthetic topology and representative acceptance workload, not production
+  PRTG traffic or horizontal scale.
 - No normalized-history persistence, counter-to-rate processing, Redis,
   PostgreSQL, Kubernetes, or cloud resources were added.
 - Phase 0.5B measured approximately 116.25 MiB total during its smoke sample.

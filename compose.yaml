@@ -35,6 +35,8 @@ x-common-security: &common-security
 services:
   simulator:
     <<: *common-security
+    cpus: 1.0
+    mem_limit: 128m
     build:
       context: .
       dockerfile: Dockerfile
@@ -76,6 +78,8 @@ services:
 
   collector:
     <<: *common-security
+    cpus: 1.0
+    mem_limit: 96m
     image: coreview-cloud-lab:0.5c
     pull_policy: never
     command: ["python", "-u", "monitor.py"]
@@ -97,6 +101,8 @@ services:
 
   app:
     <<: *common-security
+    cpus: 1.0
+    mem_limit: 128m
     image: coreview-cloud-lab:0.5c
     pull_policy: never
     command:
