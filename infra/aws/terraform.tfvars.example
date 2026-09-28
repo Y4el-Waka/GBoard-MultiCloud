@@ -1,0 +1,9 @@
+# Copy this file to terraform.tfvars (ignored) and replace every placeholder.
+# Use an approved, non-overlapping RFC1918 network; do not commit account IDs.
+allowed_account_ids = ["replace-with-authorized-account-id"]
+vpc_cidr            = "replace-with-approved-rfc1918-vpc-16-cidr"
+image_tag           = "replace-with-reviewed-immutable-image-tag"
+
+# After the first read-only plan, copy the resolved_ami_id output here and
+# review a second plan before any Phase 1.0B apply.
+# ami_id_override = "replace-with-reviewed-al2023-ami-id"

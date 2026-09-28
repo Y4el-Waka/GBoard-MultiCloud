@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly install_root="/opt/coreview"
+readonly compose_plugin="/usr/local/lib/docker/cli-plugins/docker-compose"
+
+dnf install --assumeyes docker curl openssl
+install -d -m 0755 "$(dirname "$compose_plugin")" "$install_root/bin"
+
+curl --fail --silent --show-error --location \
+  "https://github.com/docker/compose/releases/download/v${docker_compose_version}/docker-compose-linux-x86_64" \
+  --output "$compose_plugin"
+printf '%s  %s\n' '${docker_compose_sha256}' "$compose_plugin" | sha256sum --check --status
+chmod 0755 "$compose_plugin"
+
+printf '%s' '${compose_config_b64}' | base64 --decode > "$install_root/compose.yaml"
+printf '%s' '${servers_config_b64}' | base64 --decode > "$install_root/servers.synthetic.json"
+chown root:root "$install_root/compose.yaml" "$install_root/servers.synthetic.json"
+chmod 0644 "$install_root/compose.yaml" "$install_root/servers.synthetic.json"
+
+cat > "$install_root/bin/ecr-login" <<'ECR_LOGIN'
+#!/usr/bin/env bash
+set -euo pipefail
+aws ecr get-login-password --region '${aws_region}' \
+  | docker login --username AWS --password-stdin '${ecr_registry}' >/dev/null
+ECR_LOGIN
+chmod 0755 "$install_root/bin/ecr-login"
+
+cat > "$install_root/bin/initialize-lab-secrets" <<'INITIALIZE_SECRETS'
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+
+if [[ "$EUID" -ne 0 ]]; then
+  exec sudo -- "$0" "$@"
+fi
+
+readonly env_file="/opt/coreview/.env"
+if [[ -e "$env_file" ]]; then
+  echo "Refusing to overwrite existing runtime secrets: $env_file" >&2
+  exit 1
+fi
+
+read -r -s -p "Synthetic lab admin password (16+ characters; letters, digits, dot, underscore or hyphen): " admin_password
+printf '\n'
+if (( $${#admin_password} < 16 )); then
+  echo "Password is shorter than 16 characters; no file was written." >&2
+  unset admin_password
+  exit 1
+fi
+if [[ ! "$admin_password" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "Password contains a character unsafe for the Compose JSON environment contract; no file was written." >&2
+  unset admin_password
+  exit 1
+fi
+
+app_secret="$(openssl rand -hex 32)"
+{
+  printf 'COREVIEW_LAB_APP_SECRET=%s\n' "$app_secret"
+  printf 'COREVIEW_LAB_ADMIN_PASSWORD=%s\n' "$admin_password"
+} > "$${env_file}.tmp"
+chown root:root "$${env_file}.tmp"
+chmod 0600 "$${env_file}.tmp"
+mv "$${env_file}.tmp" "$env_file"
+unset app_secret admin_password
+
+systemctl start coreview-lab.service
+echo "Runtime secrets created and CoreView startup requested."
+INITIALIZE_SECRETS
+chmod 0755 "$install_root/bin/initialize-lab-secrets"
+
+cat > /etc/systemd/system/coreview-lab.service <<'SYSTEMD_UNIT'
+[Unit]
+Description=CoreView Cloud Lab synthetic Docker Compose stack
+Requires=docker.service
+After=docker.service network-online.target amazon-ssm-agent.service
+Wants=network-online.target
+ConditionPathExists=/opt/coreview/.env
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/coreview
+ExecStartPre=/opt/coreview/bin/ecr-login
+ExecStart=/usr/bin/docker compose --env-file /opt/coreview/.env --file /opt/coreview/compose.yaml up --detach --wait --wait-timeout 180
+ExecStop=/usr/bin/docker compose --env-file /opt/coreview/.env --file /opt/coreview/compose.yaml down --remove-orphans
+TimeoutStartSec=300
+TimeoutStopSec=90
+
+[Install]
+WantedBy=multi-user.target
+SYSTEMD_UNIT
+
+systemctl enable --now docker.service
+systemctl enable --now amazon-ssm-agent.service
+systemctl daemon-reload
+systemctl enable coreview-lab.service
+
+echo "CoreView host bootstrap complete; initialize runtime secrets through an authorized SSM shell."

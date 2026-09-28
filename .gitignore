@@ -28,6 +28,18 @@ htmlcov/
 artifacts/
 .cache/
 
+# Terraform local state and per-operator inputs
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+backend.hcl
+crash.log
+crash.*.log
+*.tfplan
+
 # OS / editor
 .DS_Store
 .vscode/
