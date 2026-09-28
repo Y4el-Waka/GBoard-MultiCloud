@@ -84,6 +84,70 @@ class ContainerSupplyChainTests(unittest.TestCase):
         self.assertRegex(workflow, r"actions/upload-artifact@[0-9a-f]{40}")
         self.assertIn("path: artifacts", workflow)
 
+    def test_ci_image_export_is_manual_separate_and_after_validation(self) -> None:
+        workflow = (REPO_ROOT / ".github/workflows/container-ci.yml").read_text(
+            encoding="utf-8"
+        )
+        exporter = (REPO_ROOT / "scripts/export_ci_image.sh").read_text(
+            encoding="utf-8"
+        )
+
+        scan = workflow.index("scripts/container_supply_chain.sh")
+        evidence_upload = workflow.index("name: coreview-container-evidence")
+        privacy_guard = workflow.index(
+            "name: Refuse image export outside a private repository"
+        )
+        image_export = workflow.index("scripts/export_ci_image.sh")
+        image_upload = workflow.index("name: coreview-validated-image-")
+        cleanup = workflow.index("name: Clean Compose resources")
+        for required_control in (
+            "Run Python tests",
+            "Run JavaScript tests",
+            "Run static validation",
+            "Prove clean-state startup",
+            "Run full synthetic smoke",
+            "Run bounded API burst under resource limits",
+            "Run restricted resource soak",
+            "Run browser smoke without external network",
+            "Verify persistence across consumer restart",
+            "Generate SBOM and scan image",
+        ):
+            self.assertLess(workflow.index(required_control), image_export)
+        self.assertLess(scan, evidence_upload)
+        self.assertLess(evidence_upload, privacy_guard)
+        self.assertLess(privacy_guard, image_export)
+        self.assertLess(image_export, image_upload)
+        self.assertLess(image_upload, cleanup)
+        self.assertIn("export_validated_image", workflow)
+        self.assertIn("default: false", workflow)
+        self.assertEqual(workflow.count("retention-days: 3"), 1)
+        self.assertIn("compression-level: 0", workflow)
+        self.assertIn("runner.temp }}/coreview-validated-image", workflow)
+        self.assertIn("success()", workflow)
+        self.assertIn("github.event.repository.private == true", workflow)
+        self.assertIn("github.event.repository.private != true", workflow)
+        self.assertNotIn("id-token: write", workflow)
+        self.assertNotIn("docker push", workflow)
+
+        self.assertIn("docker image save --output", exporter)
+        self.assertIn("sha256sum --check", exporter)
+        self.assertIn("GITHUB_SHA", exporter)
+        self.assertIn("GITHUB_RUN_ID", exporter)
+        self.assertIn("GITHUB_RUN_ATTEMPT", exporter)
+        self.assertIn("GITHUB_WORKFLOW_REF", exporter)
+        self.assertIn("image-inspect.json", exporter)
+        self.assertIn("validated_image_id", exporter)
+        self.assertIn("secret_checks", exporter)
+        self.assertIn("forbidden secret environment key", exporter)
+        self.assertIn("Image build history contains", exporter)
+        self.assertIn("--network none", exporter)
+        self.assertIn("--read-only", exporter)
+        self.assertIn("--cap-drop ALL", exporter)
+        self.assertIn("--security-opt no-new-privileges", exporter)
+        self.assertIn("forbidden runtime file", exporter)
+        self.assertNotIn("docker build", exporter)
+        self.assertNotIn("docker push", exporter)
+
     def test_compose_security_contract_remains_intact(self) -> None:
         compose = (REPO_ROOT / "compose.yaml").read_text(encoding="utf-8")
 

@@ -66,16 +66,25 @@ they were built from the same commit or produce the same application behavior.
 
 ## Alternatives when the local image does not match
 
-Neither alternative is implemented or authorized by this release gate.
+Alternative A is prepared locally behind an opt-in manual workflow input, but
+is not committed, pushed, enabled or executed by this release gate. Alternative
+B remains unimplemented. Neither alternative is authorized until the proposed
+diff and storage/private-code exposure are approved explicitly.
 
 ### A. Controlled CI image export
 
-A separately approved manual workflow could run only after all test/scan steps,
-export the tested image with `docker image save`, create a deterministic
-compressed archive, record its SHA-256, image ID and full source commit, and
-upload it as a short-retention, access-controlled private artifact. The
-operator would verify the archive checksum and loaded image ID before ECR push.
-The storage impact and private-code exposure must be approved first.
+The prepared workflow change adds a Boolean `workflow_dispatch` input named
+`export_validated_image`, disabled by default. Pushes, pull requests and manual
+runs that leave the input disabled do not export the image. When explicitly
+enabled, the export runs after the existing tests, smoke, burst, soak,
+offline-browser, persistence, SBOM and vulnerability controls have succeeded.
+It saves the already-tested `coreview-cloud-lab:0.5c` image without rebuilding
+it, verifies its image ID against the pre-scan evidence, and fails closed if
+the OCI configuration, build history or filesystem contains forbidden secret
+markers or embedded runtime data. The tar, checksum, image inspection and
+commit/run/attempt metadata are uploaded together as a separate three-day
+artifact. A guard refuses export unless GitHub reports that the
+repository is private. It adds no AWS permission, OIDC token or ECR operation.
 
 ### B. Manual CI-to-ECR publication with OIDC
 
@@ -86,6 +95,53 @@ workflow/ref and protected GitHub environment. The AWS role should permit only
 ECR authorization, layer upload, `PutImage` and read-back verification on the
 single repository. No static AWS secret, automatic push trigger, infrastructure
 permission or mutable tag is acceptable.
+
+## Verify a controlled CI export
+
+After explicit approval, commit and push the workflow change, then dispatch the
+workflow for that exact commit with `export_validated_image=true`. Do not use an
+artifact from a different run or attempt. Download and verify it as follows:
+
+```bash
+export CI_RUN_ID="<APPROVED_SUCCESSFUL_RUN_ID>"
+umask 077
+export CI_IMAGE_DIR="$(mktemp -d)"
+
+gh run view "$CI_RUN_ID" \
+  --json headSha,status,conclusion,url,workflowName
+gh run download "$CI_RUN_ID" \
+  --pattern 'coreview-validated-image-*' \
+  --dir "$CI_IMAGE_DIR"
+
+export CI_IMAGE_ARTIFACT_DIR="$(find "$CI_IMAGE_DIR" -name metadata.json \
+  -type f -printf '%h\n' -quit)"
+test -n "$CI_IMAGE_ARTIFACT_DIR"
+cd "$CI_IMAGE_ARTIFACT_DIR"
+sha256sum --check coreview-validated-image.tar.sha256
+
+export EXPORTED_COMMIT="$(jq -r '.source_commit' metadata.json)"
+export EXPORTED_IMAGE_ID="$(jq -r '.image_id' metadata.json)"
+export EXPORTED_RUN_ID="$(jq -r '.run_id' metadata.json)"
+export EXPORTED_RUN_ATTEMPT="$(jq -r '.run_attempt' metadata.json)"
+test "${#EXPORTED_COMMIT}" -eq 40
+test "$EXPORTED_RUN_ID" = "$CI_RUN_ID"
+test "$EXPORTED_RUN_ATTEMPT" != "null"
+test "$EXPORTED_COMMIT" = "$(gh run view "$CI_RUN_ID" --json headSha \
+  --jq '.headSha')"
+test "$EXPORTED_IMAGE_ID" = "$(jq -r '.[0].Id' image-inspect.json)"
+
+docker load --input coreview-validated-image.tar
+export LOADED_IMAGE_ID="$(docker image inspect coreview-cloud-lab:0.5c \
+  --format '{{.Id}}')"
+test "$LOADED_IMAGE_ID" = "$EXPORTED_IMAGE_ID"
+```
+
+The archive contains the private application source copied into the image even
+though the build excludes local secrets and runtime state. Keep the temporary
+directory mode-restricted, grant artifact access only to authorized repository
+users, and remove the downloaded archive securely after use. GitHub deletes the
+artifact after its configured three-day retention, subject to repository policy;
+that does not delete copies already downloaded by operators.
 
 ## Release SHA and local operator input
 
@@ -158,6 +214,8 @@ Use actual-cost and forecast alerts appropriate to the approved duration.
 - [ ] CI artifact and workflow logs retained for the approval window.
 - [ ] Image ID, OS, architecture, Config and RootFS comparison is exact.
 - [ ] Any image mismatch is resolved through an explicitly approved alternative.
+- [ ] If CI export is approved, its manual input is enabled only for the exact
+      reviewed commit and its checksum, run metadata and loaded image ID match.
 - [ ] Ignored `terraform.tfvars` contains the full release SHA.
 - [ ] Old short-tag plan is retired; new read-only plan reports 16/0/0.
 - [ ] Budget/duration and alert recipients are approved.

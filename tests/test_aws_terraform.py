@@ -255,7 +255,9 @@ class AWSTerraformPreparationTests(unittest.TestCase):
         ):
             self.assertIn(contract, release_gate)
         self.assertNotIn("id-token: write", workflow)
-        self.assertNotIn("docker image save", workflow)
+        self.assertIn("docker image save", (
+            REPO_ROOT / "scripts/export_ci_image.sh"
+        ).read_text(encoding="utf-8"))
         self.assertNotIn("docker push", workflow)
 
     def test_frontend_and_application_runtime_files_are_untouched_by_terraform(self) -> None:

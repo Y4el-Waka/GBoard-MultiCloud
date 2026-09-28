@@ -4,6 +4,12 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      export_validated_image:
+        description: Export the exact tested image as a private short-retention artifact
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -110,6 +116,26 @@ jobs:
           path: artifacts
           if-no-files-found: error
           retention-days: 14
+
+      - name: Refuse image export outside a private repository
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.export_validated_image && github.event.repository.private != true }}
+        run: |
+          echo "Validated image export requires a private repository." >&2
+          exit 1
+
+      - name: Prepare exact validated image export
+        if: ${{ success() && github.event_name == 'workflow_dispatch' && inputs.export_validated_image && github.event.repository.private == true }}
+        run: scripts/export_ci_image.sh "${{ runner.temp }}/coreview-validated-image"
+
+      - name: Upload exact validated image
+        if: ${{ success() && github.event_name == 'workflow_dispatch' && inputs.export_validated_image && github.event.repository.private == true }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coreview-validated-image-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/coreview-validated-image
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
 
       - name: Clean Compose resources
         if: always()
