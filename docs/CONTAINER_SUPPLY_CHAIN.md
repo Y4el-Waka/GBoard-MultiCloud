@@ -22,8 +22,26 @@ base lineage. A base update is deliberate: resolve a new digest, scan it,
 rebuild without cache, execute all tests/smoke, and update the digest test and
 this document together.
 
-The Dockerfile copies only Python modules, `metrics/`, templates, static assets,
-and the container healthcheck. It does not use `COPY .`, and `.dockerignore`
+On 2026-09-27 the current `python:3.12-slim-bookworm` and `node:22-alpine`
+tags were pulled/inspected for the validated platform and still resolved to
+the exact digests pinned below and above. No compatible base change was made;
+the complete Trivy findings remain visible rather than being hidden by an
+unrelated stack update.
+
+Phase 0.5C also has a build-only frontend stage:
+
+- reference: `node:22-alpine`;
+- immutable digest:
+  `sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402`;
+- resolved validation version: Node 22.23.3 on Linux/amd64.
+
+It installs exact `package-lock.json` development dependencies with `npm ci`
+and emits `static/vendor`. Only that output enters the Python runtime. Node,
+npm, Playwright, Tailwind tooling, and `node_modules` do not.
+
+The Dockerfile copies only Python modules, `metrics/`, templates, reviewed
+static assets, generated vendor output, and the container healthcheck. It does
+not use `COPY .`, and `.dockerignore`
 excludes developer configuration, databases, snapshots, uploads, tests,
 documentation, caches, and generated evidence.
 
@@ -122,7 +140,9 @@ current advisory database reports a fixed version:
 There is no `.trivyignore` and no hidden CVE exception list. Adding one requires
 a written owner, scope, reason, expiry, and compensating control.
 
-Scan executed on 2026-09-27 against image `coreview-cloud-lab:0.5b`:
+The Phase 0.5C result is refreshed by the final validation command. The table
+below records the most recent completed scan against
+`coreview-cloud-lab:0.5c`:
 
 | Scope | Critical | High | Medium | Low | Unknown |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -151,21 +171,26 @@ required for exposure, reachability, and unfixed base-image risk.
 
 1. immutable-SHA checkout and Python setup actions;
 2. hash-locked dependency installation;
-3. ephemeral laboratory secret generation;
-4. Python and JavaScript tests;
-5. compile, diff, and Compose validation;
-6. destructive cleanup of only this job's prior Compose volumes;
-7. Docker build and health-gated startup;
-8. full smoke and persistence restart smoke;
-9. resource snapshot;
-10. CycloneDX SBOM and complete Trivy report;
-11. upload of evidence for 14 days;
-12. unconditional Compose volume cleanup.
+3. pinned Node setup plus `npm ci` and deterministic frontend rebuild check;
+4. ephemeral laboratory secret generation;
+5. Python and JavaScript tests;
+6. compile, diff, and Compose validation;
+7. destructive cleanup of only this job's prior Compose volumes;
+8. Docker build and health-gated startup;
+9. full API smoke and external-network-blocked Chromium smoke;
+10. persistence restart smoke and resource snapshot;
+11. CycloneDX SBOM and complete Trivy report;
+12. upload of container/browser evidence for 14 days;
+13. unconditional Compose volume cleanup.
 
 The workflow does not push images, access production secrets, contact real
 PRTG, or deploy cloud resources. GitHub-hosted execution has not been observed
 from this workspace; the workflow is created and its equivalent commands have
-been validated locally, but remote-run status remains **not validated**.
+been validated locally, but remote-run status remains **not validated**:
+
+```text
+github_actions_remote_validated: false
+```
 
 ## Clean-copy validation
 
@@ -186,29 +211,23 @@ This proves clean-copy operability of the proposed working tree. The GitHub
 workflow will provide independent clean-checkout evidence after it runs on a
 remote runner.
 
-## Frontend dependency audit
+## Frontend supply chain
 
-The frontend currently loads these remote families:
+Phase 0.5C replaced the audited Tailwind, cdnjs, jsDelivr, and Google Fonts
+requests with exact npm inputs and same-origin output. Package integrity is
+locked, distributed licenses are retained, and
+`static/vendor/manifest.json` holds SHA-256 for every runtime file. CI rebuilds
+the directory and fails on a generated diff. A real Chromium test then runs on
+an internal-only Docker network and uploads screenshots/report as evidence.
 
-- Tailwind browser runtime from `cdn.tailwindcss.com`;
-- Font Awesome 6.4.0 and Toastr from `cdnjs.cloudflare.com`;
-- jQuery 3.7.1 from `cdnjs.cloudflare.com`;
-- Chart.js and chartjs-adapter-date-fns 3.0.0 from `cdn.jsdelivr.net`;
-- Inter font CSS and font files from Google Fonts.
-
-Tailwind runtime, Chart.js, and Toastr use URLs that are not fully immutable.
-Migrating them safely requires a licensed asset inventory, local build step for
-Tailwind classes, exact version selection, license notices, CSP changes, and
-browser testing with outbound access blocked. That is broader than the
-container supply-chain change, so no frontend file or CSP was modified.
-
-An automated allowlist now fails on any unexpected external URL, while the
-existing SHA-256 frontend integrity test remains active. The laboratory is
-**not claimed to be browser-offline**.
+The exact seven-package inventory, licenses, CSP, Playwright image digest, and
+update process are documented in `docs/OFFLINE_FRONTEND.md`. This proves
+runtime-offline behavior for the tested synthetic matrix; it does not claim a
+cold dependency build can run without a trusted package/image source.
 
 ## Resource measurement
 
-Method on 2026-09-27:
+Short-run method on 2026-09-27:
 
 - Docker Engine 29.1.3, Compose 2.40.3, Linux/amd64;
 - host memory reported by Docker: 23.18 GiB;
@@ -229,8 +248,30 @@ The simultaneous smoke sample used approximately 116.25 MiB total and 29.43%
 aggregate point-in-time CPU. The highest all-service startup sample used about
 112.35 MiB and 52.32% aggregate CPU. These are short-run samples, not capacity
 or percentile measurements; the host was also running unrelated containers.
-No CPU or memory limits were introduced. A longer isolated soak and burst test
-is required before selecting limits that will not create false health failures.
+Phase 0.5C then ran the health-aware sampler for 3,602.188 seconds at a nominal
+30-second interval. The 114 real samples retained Docker stats plus application
+contract checks. Every sample found all three containers healthy, no restart or
+OOM, 13 servers, 1,000 sensors, and zero collector errors. Snapshot age stayed
+below 5.057 seconds (p95 4.773 seconds).
+
+| Service | CPU mean | CPU p95 | CPU max | Memory mean | Memory p95 | Memory max | First → last | Linear slope |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| app | 5.122% | 27.05% | 28.74% | 50.004 MiB | 51.17 MiB | 64.04 MiB | 49.00 → 49.27 MiB | +0.749 MiB/h |
+| collector | 6.695% | 25.47% | 33.07% | 29.639 MiB | 30.88 MiB | 43.86 MiB | 28.71 → 28.56 MiB | +0.612 MiB/h |
+| simulator | 6.032% | 27.72% | 29.48% | 45.417 MiB | 53.85 MiB | 60.75 MiB | 44.30 → 44.07 MiB | -0.247 MiB/h |
+
+Total memory averaged 125.061 MiB, with p95 138.55 MiB and maximum
+150.41 MiB. The small positive fitted slopes for app and collector coexist
+with nearly flat first/last readings and are not sufficient evidence of a
+leak over one hour.
+
+No CPU or memory limits are enforced yet. Evidence-based candidate ceilings
+for a later constrained validation are app 128 MiB/1 CPU, collector
+96 MiB/1 CPU, and simulator 128 MiB/1 CPU. These provide at least twice the
+observed per-service memory maxima and more than the observed CPU peaks, but
+they must pass clean startup, smoke, and a burst/soak run before being added to
+Compose. The raw evidence is generated under `artifacts/soak/` and remains an
+ignored local/CI artifact.
 
 ## Update procedure
 

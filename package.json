@@ -1,0 +1,23 @@
+{
+  "name": "coreview-cloud-lab-frontend",
+  "version": "0.5.0",
+  "private": true,
+  "description": "Reproducible local frontend assets for CoreView Cloud Lab",
+  "scripts": {
+    "build:frontend": "node scripts/build_frontend.mjs",
+    "test:frontend": "node --test tests/frontend/*.js"
+  },
+  "devDependencies": {
+    "@fontsource/inter": "5.3.0",
+    "@fortawesome/fontawesome-free": "6.4.0",
+    "chart.js": "4.5.1",
+    "chartjs-adapter-date-fns": "3.0.0",
+    "jquery": "3.7.1",
+    "playwright": "1.63.0",
+    "tailwindcss": "3.4.17",
+    "toastr": "2.1.4"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

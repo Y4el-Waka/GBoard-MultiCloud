@@ -1,7 +1,24 @@
+FROM node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS frontend-builder
+
+ENV NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_FUND=false
+
+WORKDIR /build
+
+COPY package.json package-lock.json tailwind.config.cjs ./
+COPY scripts/build_frontend.mjs ./scripts/build_frontend.mjs
+COPY frontend ./frontend
+COPY templates ./templates
+COPY static/dashboard.js static/metrics-history.js ./static/
+COPY static/src ./static/src
+
+RUN npm ci --ignore-scripts \
+    && npm run build:frontend
+
 FROM python:3.12-slim-bookworm@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e
 
 LABEL org.opencontainers.image.title="CoreView Cloud Lab" \
-      org.opencontainers.image.version="0.5b" \
+      org.opencontainers.image.version="0.5c" \
       org.opencontainers.image.base.name="docker.io/library/python:3.12-slim-bookworm" \
       org.opencontainers.image.base.digest="sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e"
 
@@ -26,6 +43,7 @@ COPY --chown=10001:10001 *.py ./
 COPY --chown=10001:10001 metrics ./metrics
 COPY --chown=10001:10001 templates ./templates
 COPY --chown=10001:10001 static ./static
+COPY --from=frontend-builder --chown=10001:10001 /build/static/vendor ./static/vendor
 COPY --chown=10001:10001 scripts/docker_healthcheck.py ./scripts/docker_healthcheck.py
 
 RUN mkdir -p /runtime /app/static/uploads/alert_sounds \

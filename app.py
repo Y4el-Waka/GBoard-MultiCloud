@@ -1561,12 +1561,18 @@ def create_app(
 
         resp.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' cdn.tailwindcss.com cdn.jsdelivr.net cdnjs.cloudflare.com code.jquery.com; "
-            "style-src 'self' 'unsafe-inline' fonts.googleapis.com cdnjs.cloudflare.com; "
-            "font-src 'self' fonts.gstatic.com cdnjs.cloudflare.com data:; "
+            "script-src 'self' "
+            "'sha256-VipBBiL666DAnTxelPyshRYAlHJnRuFLs4SuZVwRvyA=' "
+            "'sha256-Ac0FxSJ1qiWsYEJsIbqG7y2UDd9sNwJhG2h0D4899VU='; "
+            "style-src 'self' "
+            "'sha256-Ln6td5spo5k6WZMR4CaWDJjlP0R/4sXHqkYbczv2dEk=' "
+            "'sha256-Cvc64ISWTrTozk2UC2pxRHxmhk/N3vGtMvuaSv3bc4k='; "
+            "font-src 'self'; "
             "img-src 'self' data:; "
             "connect-src 'self'; "
             "object-src 'none'; "
+            "base-uri 'self'; "
+            "form-action 'self'; "
             "frame-ancestors 'none'"
         )
 

@@ -13,31 +13,11 @@
     })();
   </script>
 
-  <script src="https://cdn.tailwindcss.com"></script>
-
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            prtg: {
-              up: '#7ad03a',
-              down: '#dd3d36',
-              warning: '#ffb700',
-              paused: '#296E8A',
-              acknowledged: '#7e57c2',
-              unknown: '#90a4ae'
-            }
-          }
-        }
-      }
-    }
-  </script>
-
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.css">
-  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}?v=20260924-metrics1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/tailwind/tailwind.min.css') }}?v=3.4.17">
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/inter/inter.css') }}?v=5.3.0">
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fontawesome/css/all.min.css') }}?v=6.4.0">
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/toastr/toastr.min.css') }}?v=2.1.4">
+  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}?v=20260927-offline1">
 
 
   <!-- MF visual override: alerta sutil en toda la tarjeta, sin recuadro interno -->
@@ -1091,12 +1071,12 @@
   </div>
 </div>
   <!-- Scripts: jQuery antes de Toastr -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.js"></script>
+  <script src="{{ url_for('static', filename='vendor/jquery/jquery.min.js') }}?v=3.7.1"></script>
+  <script src="{{ url_for('static', filename='vendor/toastr/toastr.min.js') }}?v=2.1.4"></script>
 
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
-  <script src="{{ url_for('static', filename='metrics-history.js') }}?v=20260924-metrics1"></script>
-  <script src="{{ url_for('static', filename='dashboard.js') }}?v=20260924-metrics1"></script>
+  <script src="{{ url_for('static', filename='vendor/chart.js/chart.umd.min.js') }}?v=4.5.1"></script>
+  <script src="{{ url_for('static', filename='vendor/chartjs-adapter-date-fns/chartjs-adapter-date-fns.bundle.min.js') }}?v=3.0.0"></script>
+  <script src="{{ url_for('static', filename='metrics-history.js') }}?v=20260927-offline1"></script>
+  <script src="{{ url_for('static', filename='dashboard.js') }}?v=20260927-offline1"></script>
 </body>
 </html>

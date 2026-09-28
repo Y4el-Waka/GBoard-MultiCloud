@@ -7,6 +7,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BASE_DIGEST = "sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e"
+NODE_DIGEST = "sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402"
 TRIVY_DIGEST = "sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969"
 
 
@@ -17,10 +18,8 @@ class ContainerSupplyChainTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertRegex(
-            dockerfile.splitlines()[0],
-            rf"^FROM python:3\.12-slim-bookworm@{BASE_DIGEST}$",
-        )
+        self.assertRegex(dockerfile.splitlines()[0], rf"^FROM node:22-alpine@{NODE_DIGEST} AS frontend-builder$")
+        self.assertIn(f"FROM python:3.12-slim-bookworm@{BASE_DIGEST}", dockerfile)
         self.assertIn(f'aquasec/trivy@{TRIVY_DIGEST}', scanner)
         self.assertNotIn("aquasec/trivy:latest", scanner)
 
@@ -61,12 +60,16 @@ class ContainerSupplyChainTests(unittest.TestCase):
 
         for contract in (
             "python -m unittest discover -s tests -v",
-            "node --test tests/frontend/test_metrics_history.js",
+            "npm ci --ignore-scripts --no-audit --no-fund",
+            "npm run build:frontend",
+            "git diff --exit-code -- static/vendor",
+            "npm run test:frontend",
             "python -m compileall .",
             "docker compose config --quiet",
             "docker compose down --volumes --remove-orphans || true",
             "docker compose up --detach --build --wait",
             "python scripts/docker_lab_smoke.py",
+            "scripts/run_offline_frontend_smoke.sh",
             "COREVIEW_LAB_EXPECT_PERSISTED=1",
             "scripts/container_supply_chain.sh",
             "docker compose down --volumes --remove-orphans",
@@ -77,7 +80,9 @@ class ContainerSupplyChainTests(unittest.TestCase):
         self.assertNotIn("docker push", workflow)
         self.assertRegex(workflow, r"actions/checkout@[0-9a-f]{40}")
         self.assertRegex(workflow, r"actions/setup-python@[0-9a-f]{40}")
+        self.assertRegex(workflow, r"actions/setup-node@[0-9a-f]{40}")
         self.assertRegex(workflow, r"actions/upload-artifact@[0-9a-f]{40}")
+        self.assertIn("path: artifacts", workflow)
 
     def test_compose_security_contract_remains_intact(self) -> None:
         compose = (REPO_ROOT / "compose.yaml").read_text(encoding="utf-8")
@@ -93,17 +98,7 @@ class ContainerSupplyChainTests(unittest.TestCase):
             self.assertIn(contract, compose)
         self.assertNotIn("COREVIEW_METRICS_PROVIDER: prtg", compose)
 
-    def test_frontend_remote_assets_are_an_explicit_frozen_allowlist(self) -> None:
-        expected = {
-            "https://cdn.tailwindcss.com",
-            "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css",
-            "https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js",
-            "https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.css",
-            "https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.js",
-            "https://cdn.jsdelivr.net/npm/chart.js",
-            "https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js",
-            "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap",
-        }
+    def test_frontend_runtime_has_no_remote_assets(self) -> None:
         observed: set[str] = set()
         pattern = re.compile(
             r"https://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}[^\"'()\s]*"
@@ -120,19 +115,27 @@ class ContainerSupplyChainTests(unittest.TestCase):
                 pattern.findall((REPO_ROOT / relative).read_text(encoding="utf-8"))
             )
 
-        self.assertEqual(observed, expected)
+        self.assertEqual(observed, set())
 
     def test_build_context_and_artifacts_exclude_runtime_secrets(self) -> None:
         dockerignore = (REPO_ROOT / ".dockerignore").read_text(encoding="utf-8")
         gitignore = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
         dockerfile = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
 
-        for protected in (".env", "servers.json", "usuarios.db", "artifacts"):
+        for protected in (
+            ".env",
+            "servers.json",
+            "usuarios.db",
+            "artifacts",
+            "node_modules",
+            "static/vendor",
+        ):
             self.assertIn(protected, dockerignore)
         for generated in ("artifacts/", ".cache/"):
             self.assertIn(generated, gitignore)
         self.assertNotIn("COPY . ", dockerfile)
         self.assertNotIn("COPY .\n", dockerfile)
+        self.assertIn("COPY --from=frontend-builder", dockerfile)
 
 
 if __name__ == "__main__":

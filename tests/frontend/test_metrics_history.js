@@ -2,6 +2,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const metrics = require('../../static/metrics-history.js');
 
 function channel(label, unit, values = [1, 2]) {
@@ -260,4 +262,38 @@ test('Chart.js cleanup destroys every instance and empties the owner array', () 
   metrics.destroyChartInstances(charts);
   assert.deepEqual(destroyed, [1, 2, 3]);
   assert.equal(charts.length, 0);
+});
+
+test('local Chart.js bundle is pinned and loadable', () => {
+  const chart = require('../../static/vendor/chart.js/chart.umd.min.js');
+  assert.equal(chart.version, '4.5.1');
+});
+
+test('local icon and font styles reference only local font files', () => {
+  const fontAwesome = fs.readFileSync(
+    path.join(__dirname, '../../static/vendor/fontawesome/css/all.min.css'),
+    'utf8'
+  );
+  const inter = fs.readFileSync(
+    path.join(__dirname, '../../static/vendor/inter/inter.css'),
+    'utf8'
+  );
+  assert.match(fontAwesome, /Font Awesome 6 Free/);
+  assert.match(fontAwesome, /\.\.\/webfonts\/fa-solid-900\.woff2/);
+  assert.match(inter, /inter-latin-800-normal\.woff2/);
+  assert.doesNotMatch(`${fontAwesome}\n${inter}`, /url\(["']?https?:\/\//i);
+});
+
+test('runtime templates contain no CDN asset URLs', () => {
+  const runtimeSources = [
+    '../../templates/login.html',
+    '../../templates/dashboard_prtg.html',
+    '../../static/dashboard.css',
+    '../../static/dashboard.js',
+    '../../static/metrics-history.js'
+  ].map(relative => fs.readFileSync(path.join(__dirname, relative), 'utf8'));
+  const externalAsset = /(?:src|href|@import)\s*(?:=|url\()?\s*["']https?:\/\//i;
+  for (const source of runtimeSources) {
+    assert.doesNotMatch(source, externalAsset);
+  }
 });

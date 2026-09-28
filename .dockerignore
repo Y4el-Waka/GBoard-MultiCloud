@@ -2,6 +2,7 @@
 .gitignore
 .venv
 venv
+node_modules
 __pycache__
 *.py[cod]
 
@@ -25,6 +26,7 @@ htmlcov
 .pytest_cache
 artifacts
 .cache
+static/vendor
 
 .DS_Store
 .idea

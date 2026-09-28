@@ -9,12 +9,17 @@ Trivy scanning, and measured resource evidence. See
 `docs/CONTAINER_SUPPLY_CHAIN.md` for the exact digests, policy, and update
 procedure.
 
+Phase 0.5C builds all browser assets locally, tightens CSP, adds a real
+external-network-blocked Chromium smoke, and provides an isolated one-hour
+resource/health soak. See `docs/OFFLINE_FRONTEND.md`.
+
 ## Prerequisites
 
 - Docker Engine 24 or newer;
 - Docker Compose v2 with `--wait` support;
 - ports `127.0.0.1:5067` and `127.0.0.1:9090` available;
-- network access while building the Python base image/dependencies.
+- network access while obtaining pinned base images/dependencies for a cold
+  build (normal browser runtime itself is offline-capable).
 
 Docker is optional for normal development. The `.venv` procedure in `README.md`
 continues to work.
@@ -63,10 +68,11 @@ Known compatibility constraints before containerization were:
 - SQLite and snapshot paths default beside source code;
 - `app = create_app()` has import-time database side effects;
 - the simulator's logical clock and pause state are in-memory;
-- browser charts use existing CDN assets and are not an offline bundle.
+- the existing fixed dark/card UI has no selectable light/list modes.
 
-The Compose design handles the first five without changing production modules.
-The last two remain documented limitations.
+The Compose design handles the runtime boundaries without changing production
+modules. Remaining application lifecycle and UI-mode constraints are
+documented limitations.
 
 ## Required runtime secrets
 
@@ -136,6 +142,44 @@ bash scripts/container_supply_chain.sh artifacts/container
 ```
 
 The artifacts are local/CI outputs and are intentionally ignored by Git.
+
+### Offline Chromium smoke
+
+After the services are healthy, validate the actual UI with external network
+access blocked:
+
+```bash
+scripts/run_offline_frontend_smoke.sh
+```
+
+This creates a temporary Docker `--internal` network and a digest-pinned
+Playwright/Chromium container. It exercises login, views, all five normalized
+families, partial SFP, legacy fallback, filters, and pause/resume. Screenshots
+and the machine-readable result are written under
+`artifacts/offline-frontend/`. The temporary network is removed even on
+failure. Exact scope and limitations are in `docs/OFFLINE_FRONTEND.md`.
+
+### One-hour soak and resource report
+
+```bash
+.venv/bin/python scripts/docker_lab_soak.py \
+  --duration 3600 \
+  --interval 30 \
+  --output artifacts/soak
+```
+
+Every sample records per-service CPU, memory and PIDs; Docker health,
+restarts, and OOM state; application health; snapshot age; and the stable
+13-server/1,000-sensor/zero-error contract. `samples.jsonl` retains raw
+measurements and `report.json` records mean/p95/max summaries. This probe does
+not request mass histories or create synthetic load.
+
+The completed Phase 0.5C run lasted 3,602.188 seconds and collected 114 real
+samples. All services stayed healthy with zero restarts/OOM events and the
+13/1,000/zero-error contract held throughout. Total memory averaged
+125.061 MiB (p95 138.55 MiB, max 150.41 MiB). Detailed per-service CPU,
+memory, slopes, and the deliberately unenforced candidate limits are recorded
+in `docs/CONTAINER_SUPPLY_CHAIN.md`.
 
 ### Phase 0.5A execution record
 
@@ -260,11 +304,10 @@ unrelated Docker volumes.
 - Server CRUD is not supported against the read-only synthetic fixture.
 - SQLite remains single-host laboratory persistence.
 - Simulator logical state is not durable.
-- Frontend CDN dependencies may prevent first-load charts in an offline
-  browser. Phase 0.5B audits and freezes their URL allowlist but does not vendor
-  them; browser-offline operation is not claimed.
+- Browser runtime is offline-capable, but a cold image/npm build still needs
+  its pinned artifacts or an explicitly managed trusted cache.
 - No normalized-history persistence, counter-to-rate processing, Redis,
   PostgreSQL, Kubernetes, or cloud resources were added.
 - Phase 0.5B measured approximately 116.25 MiB total during its smoke sample.
-  These short point samples are documented in `CONTAINER_SUPPLY_CHAIN.md`; no
-  resource limits were set without an isolated soak test.
+  The longer Phase 0.5C measurements and resource-limit decision are recorded
+  in `CONTAINER_SUPPLY_CHAIN.md`.

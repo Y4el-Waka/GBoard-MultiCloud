@@ -24,8 +24,8 @@ class FrontendMetricsTests(unittest.TestCase):
             0,
             f"Frontend tests failed:\n{result.stdout}\n{result.stderr}",
         )
-        self.assertIn("# tests 15", result.stdout)
-        self.assertIn("# pass 15", result.stdout)
+        self.assertIn("# tests 18", result.stdout)
+        self.assertIn("# pass 18", result.stdout)
 
     def test_feature_flag_is_rendered_as_a_safe_boolean(self) -> None:
         source = (REPO_ROOT / "templates" / "dashboard_prtg.html").read_text(

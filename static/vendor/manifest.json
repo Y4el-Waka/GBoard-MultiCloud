@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "generated_by": "scripts/build_frontend.mjs",
+  "packages": {
+    "tailwindcss": {
+      "version": "3.4.17",
+      "license": "MIT"
+    },
+    "jquery": {
+      "version": "3.7.1",
+      "license": "MIT"
+    },
+    "toastr": {
+      "version": "2.1.4",
+      "license": "MIT"
+    },
+    "chart.js": {
+      "version": "4.5.1",
+      "license": "MIT"
+    },
+    "chartjs-adapter-date-fns": {
+      "version": "3.0.0",
+      "license": "MIT"
+    },
+    "@fortawesome/fontawesome-free": {
+      "version": "6.4.0",
+      "license": "(CC-BY-4.0 AND OFL-1.1 AND MIT)"
+    },
+    "@fontsource/inter": {
+      "version": "5.3.0",
+      "license": "OFL-1.1"
+    }
+  },
+  "assets": {
+    "chart.js/chart.umd.min.js": "48444a82d4edcb5bec0f1965faacdde18d9c17db3063d042abada2f705c9f54a",
+    "chart.js/chart.umd.min.js.map": "8c328df49d295935c81d64d3b36d6ac1c20c385f1ba5b4df3ec12a26b3d64d9b",
+    "chartjs-adapter-date-fns/chartjs-adapter-date-fns.bundle.min.js": "ea7ab30d26c38dcf1f2d26bb43e73a94537b58f1906f55e1a546dd09321b5615",
+    "fontawesome/css/all.min.css": "1edb1725a9ea8ca4dcf2f5508cee183218aa1685e47c1b23056717f754f58ebf",
+    "fontawesome/webfonts/fa-brands-400.ttf": "20c4a58bc9d1d69e935d06f1528923646a715be5e218665655cade8f5f1b8c00",
+    "fontawesome/webfonts/fa-brands-400.woff2": "748332090c4b8e20f95d0ff59f0be20fa9c889359d3b36d4b886d73376054207",
+    "fontawesome/webfonts/fa-regular-400.ttf": "528d022dce6725f8a0811fd91d8e6513445c81ef33353a5c3234eab932551abf",
+    "fontawesome/webfonts/fa-regular-400.woff2": "8e7e5ea1b15f62ab14dbd41768e8fbcd21cc859a4ea5da812457ee714299fb35",
+    "fontawesome/webfonts/fa-solid-900.ttf": "67a65763c7f80903d81603bbeb9049fc2bf28508479b83ed011fe24c71fa950a",
+    "fontawesome/webfonts/fa-solid-900.woff2": "7152a6933ee3d690ec2af3d09da9d701723d16aa3410a6d80f28ff8866f3b880",
+    "fontawesome/webfonts/fa-v4compatibility.ttf": "0515a423f828ce4e6accf92a2ea0b03d19d31cc86d9af0373291e1fd4db5f348",
+    "fontawesome/webfonts/fa-v4compatibility.woff2": "694a17c3d9d6c05f8aac63c544615552a4b220e9a4de863d87341a6bcfc1bc8d",
+    "inter/files/inter-latin-400-normal.woff2": "8909904ab6c872eb994093482a88a28eca2cd95912d7b6fecd72103b0dc07edc",
+    "inter/files/inter-latin-500-normal.woff2": "f3779f1efccc4bdcdf9c0a02ab95bf6bd092ed09c48c08cedc725889edd1d19f",
+    "inter/files/inter-latin-600-normal.woff2": "f9a06e79cd3a2a20951c0f0e28f66dd0e6d3fda73911d640a2125c8fcb78f21a",
+    "inter/files/inter-latin-700-normal.woff2": "6f56409fd3d64bb85f7d070bce20749db2d66b6d63cec586cc22d1c761be2491",
+    "inter/files/inter-latin-800-normal.woff2": "a7d0a50f15d389cad679238466bdb5fc9787aa0715719064ce25abaff042820d",
+    "inter/inter.css": "cc236f91ed04172eeda261b8309e00cf3e0ad8e1304820fbdd758513d99201df",
+    "jquery/jquery.min.js": "fc9a93dd241f6b045cbff0481cf4e1901becd0e12fb45166a8f17f95823f0b1a",
+    "licenses/chart.js.txt": "41a84aa2caba645f966a18d9c2056b73e6d3a81d80bc0046bc0011a2634d4cce",
+    "licenses/chartjs-adapter-date-fns.txt": "b4b8355c2cd2b18354980a0c6422181d7bd6e895d94ae88b3570e97c60eea03d",
+    "licenses/fontawesome-free.txt": "0aa8f86525273b2efa4f40f4272a188e187704252170e979dc06879adf68d43c",
+    "licenses/inter.txt": "3b0a5fca3d17942cde889069889dedbbbd075e9b599968c82a95f4d944e9b345",
+    "licenses/jquery.txt": "d4db9ebe6f29f5168eac45ad713f055623ac5d0dcd5ba92da23d650ae012020d",
+    "licenses/tailwindcss.txt": "60e0b68c0f35c078eef3a5d29419d0b03ff84ec1df9c3f9d6e39a519a5ae7985",
+    "licenses/toastr.txt": "d9b630916d3d2930e34a958701969e47438a940bd91b2fa8dc6956f41d15e010",
+    "tailwind/tailwind.min.css": "ea4a6a5e3a5151e51590a869202880b16da40b0dad5b776fec9d17d154e1c009",
+    "toastr/toastr.min.css": "47dd690f8f315bea076e92581a7e7147443bb4c847e313ab5a7d50a8c44836d0",
+    "toastr/toastr.min.js": "1e0c2ad4e069276efa1d43fd1f7549912bfd64219119037e26574f27ca4d7143"
+  }
+}

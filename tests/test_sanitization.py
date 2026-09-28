@@ -37,11 +37,12 @@ HIGH_CONFIDENCE_SECRET_PATTERNS = {
 }
 
 FROZEN_FRONTEND_SHA256 = {
-    "templates/login.html": "a917c8126eacb8f801c88c270f82efb393535eb59d1e29f3b9af5fcc9df43ca2",
-    "templates/dashboard_prtg.html": "77775dc04e573366a5281e3db5118315817734109d1c80d16f00b4240ebd95c2",
+    "templates/login.html": "9ee39fe858beb3d2ceb7799d4bdfed076613ee1423aa70c2efecdd334775e696",
+    "templates/dashboard_prtg.html": "eb81b590f2054b1c3201bf26ce92dfca0362020cd6fd0ef1ac924637960023c5",
     "static/dashboard.js": "9ad78ad6747f7e8bd7b2017b60807c1d2972c55fb1caa61633a81ed8d6ebbc21",
-    "static/dashboard.css": "cc5bd7666368d69610dd45105667c6a65d0ad5b2244f2874505b8f795324791b",
+    "static/dashboard.css": "0b5b9ba1dd5a74bca9e3b2d235e427d844fefaa6c0c937e54344ed3e9f22f774",
     "static/metrics-history.js": "3ac3e169dd8e3f620ba5ea81ff5c5ca35e3d8cdca69b1a6eb27b598474bf0f7c",
+    "static/vendor/manifest.json": "b71c7893dbacfe592c4c66813f61d2ab57d508c4186bf13fa4c6e5e7529f69a0",
     "static/img/login-bg.jpg": "31fde8ef75dee78eeef69b4cc644a8d17e8e4cc1166639a0b896df2c32d2a6ab",
 }
 
