@@ -1,0 +1,148 @@
+name: coreview-cloud-lab
+
+x-runtime-environment: &runtime-environment
+  DB_PATH: /runtime/coreview.db
+  OUTPUT_PATH: /runtime/estado_sensores_prtg.json
+  PRTG_SERVERS_FILE: /config/servers.synthetic.json
+  PRTG_VERIFY_SSL: "0"
+  REQUEST_TIMEOUT: "10"
+  UPDATE_INTERVAL: "5"
+  MAX_WORKERS: "6"
+  SENSOR_EVENT_RETENTION_DAYS: "90"
+  COREVIEW_METRICS_PROVIDER: synthetic
+  COREVIEW_METRICS_UI_ENABLED: "true"
+  SESSION_COOKIE_SECURE: "0"
+  SEED_DEFAULT_USERS: "1"
+  LOG_LEVEL: INFO
+
+x-common-security: &common-security
+  read_only: true
+  init: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=64m
+  restart: unless-stopped
+  stop_grace_period: 20s
+  logging:
+    driver: local
+    options:
+      max-size: 10m
+      max-file: "3"
+
+services:
+  simulator:
+    <<: *common-security
+    cpus: 1.0
+    mem_limit: 128m
+    image: "$${COREVIEW_IMAGE:?Set COREVIEW_IMAGE to an approved OCIR digest URI}"
+    pull_policy: never
+    command:
+      - gunicorn
+      - --bind
+      - 0.0.0.0:9090
+      - --workers
+      - "1"
+      - --threads
+      - "4"
+      - --error-logfile
+      - '-'
+      - datos_simulados:app
+    environment:
+      SIMULATOR_SEED: "20260923"
+      SIMULATOR_TICK_SECONDS: "300"
+      SIMULATOR_SCENARIO: normal
+    networks:
+      - lab-bridge
+    ports:
+      - name: simulator-http
+        target: 9090
+        published: "9090"
+        host_ip: 127.0.0.1
+        protocol: tcp
+      - name: coreview-http
+        target: 5067
+        published: "5067"
+        host_ip: 127.0.0.1
+        protocol: tcp
+    healthcheck:
+      test: ["CMD", "python", "scripts/docker_healthcheck.py", "simulator"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  collector:
+    <<: *common-security
+    cpus: 1.0
+    mem_limit: 96m
+    image: "$${COREVIEW_IMAGE:?Set COREVIEW_IMAGE to an approved OCIR digest URI}"
+    pull_policy: never
+    command: ["python", "-u", "monitor.py"]
+    network_mode: service:simulator
+    depends_on:
+      simulator:
+        condition: service_healthy
+    environment:
+      <<: *runtime-environment
+    volumes:
+      - coreview-runtime:/runtime
+      - /opt/coreview/servers.synthetic.json:/config/servers.synthetic.json:ro
+    healthcheck:
+      test: ["CMD", "python", "scripts/docker_healthcheck.py", "collector"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 45s
+
+  app:
+    <<: *common-security
+    cpus: 1.0
+    mem_limit: 128m
+    image: "$${COREVIEW_IMAGE:?Set COREVIEW_IMAGE to an approved OCIR digest URI}"
+    pull_policy: never
+    command:
+      - gunicorn
+      - --bind
+      - 0.0.0.0:5067
+      - --workers
+      - "1"
+      - --threads
+      - "4"
+      - --access-logfile
+      - '-'
+      - --error-logfile
+      - '-'
+      - app:app
+    network_mode: service:simulator
+    depends_on:
+      simulator:
+        condition: service_healthy
+      collector:
+        condition: service_healthy
+    environment:
+      <<: *runtime-environment
+      PORT: "5067"
+      APP_SECRET_KEY: "$${COREVIEW_LAB_APP_SECRET:?Set COREVIEW_LAB_APP_SECRET}"
+      DEFAULT_USERS_JSON: >-
+        [{"username":"lab-admin","password":"$${COREVIEW_LAB_ADMIN_PASSWORD:?Set COREVIEW_LAB_ADMIN_PASSWORD}","rol":"admon"}]
+    volumes:
+      - coreview-runtime:/runtime
+      - coreview-uploads:/app/static/uploads
+      - /opt/coreview/servers.synthetic.json:/config/servers.synthetic.json:ro
+    healthcheck:
+      test: ["CMD", "python", "scripts/docker_healthcheck.py", "app"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
+
+networks:
+  lab-bridge:
+    driver: bridge
+
+volumes:
+  coreview-runtime:
+  coreview-uploads:

@@ -1,0 +1,35 @@
+# Copy to terraform.tfvars (ignored by Git) and replace every placeholder only
+# during an authorized OCI preflight. Never commit tenancy/account identifiers.
+tenancy_ocid             = "replace-with-authorized-tenancy-ocid"
+allowed_tenancy_ocids    = ["replace-with-authorized-tenancy-ocid"]
+compartment_ocid         = "replace-with-authorized-compartment-ocid"
+allowed_compartment_ocids = ["replace-with-authorized-compartment-ocid"]
+availability_domain      = "replace-with-resolved-availability-domain"
+image_ocid               = "replace-with-pinned-oracle-linux-9-x86-image-ocid"
+admin_ssh_public_key      = "replace-with-reviewed-ed25519-public-key"
+
+vcn_cidr             = "replace-with-reviewed-rfc1918-vcn-cidr"
+workload_subnet_cidr = "replace-with-reviewed-workload-subnet-cidr"
+bastion_subnet_cidr  = "replace-with-reviewed-bastion-subnet-cidr"
+bastion_client_cidrs = ["replace-with-current-operator-public-cidr"]
+
+# Resolve exact Oracle Linux 9 package NEVRAs and file checksums against the
+# pinned image during preflight. Placeholder values intentionally cannot plan.
+docker_repo_file_sha256   = "replace-with-reviewed-64-hex-sha256"
+base_package_nevras       = [
+  "replace-with-exact-ca-certificates-nevra",
+  "replace-with-exact-curl-nevra",
+  "replace-with-exact-openssl-nevra",
+  "replace-with-exact-python3-nevra",
+  "replace-with-exact-util-linux-nevra",
+  "replace-with-exact-e2fsprogs-nevra",
+  "replace-with-exact-tar-nevra",
+  "replace-with-exact-gzip-nevra",
+]
+docker_ce_version         = "replace-with-exact-nevra"
+docker_ce_cli_version     = "replace-with-exact-nevra"
+containerd_version        = "replace-with-exact-nevra"
+go_package_version        = "replace-with-exact-nevra"
+ocir_helper_source_commit = "replace-with-reviewed-40-hex-commit"
+ocir_helper_source_sha256 = "replace-with-reviewed-64-hex-sha256"
+ocir_helper_binary_sha256 = "replace-with-reviewed-64-hex-sha256"

@@ -23,7 +23,7 @@ TECHNICAL_IP_EXCEPTIONS = {
     ipaddress.ip_address("127.0.0.1"): "Loopback usado por los servicios locales del laboratorio.",
     ipaddress.ip_address("0.0.0.0"): "Direccion de bind del servidor Flask; no identifica infraestructura.",
     ipaddress.ip_address("35.235.240.0"): "Rango oficial de proxies IAP TCP de Google Cloud, limitado a SSH.",
-    ipaddress.ip_address("169.254.169.254"): "Endpoint link-local oficial de Azure IMDS para Managed Identity.",
+    ipaddress.ip_address("169.254.169.254"): "Endpoint link-local oficial de metadata para Azure IMDS y OCI Instance Metadata.",
 }
 
 IPV4_LITERAL = re.compile(
