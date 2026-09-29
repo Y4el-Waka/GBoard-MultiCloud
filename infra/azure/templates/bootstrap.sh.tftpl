@@ -1,0 +1,276 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly install_root="/opt/coreview"
+readonly compose_plugin="/usr/local/lib/docker/cli-plugins/docker-compose"
+readonly runtime_disk="/dev/disk/azure/scsi1/lun0"
+readonly docker_root="/var/lib/docker"
+readonly bootstrap_marker="$install_root/.bootstrap-${bootstrap_revision}-complete"
+
+if [[ -f "$bootstrap_marker" ]]; then
+  echo "CoreView host bootstrap revision ${bootstrap_revision} already completed."
+  exit 0
+fi
+
+export DEBIAN_FRONTEND=noninteractive
+while IFS= read -r -d '' source_file; do
+  sed -i 's|http://|https://|g' "$source_file"
+done < <(find /etc/apt -type f \( -name '*.list' -o -name '*.sources' \) -print0)
+# Prevent package installation from starting Docker against the OS disk.
+systemctl mask docker.service docker.socket
+apt-get update
+apt-get install --yes --no-install-recommends \
+  ca-certificates curl "docker.io=${docker_package_version}" openssl python3 util-linux
+
+
+for attempt in $(seq 1 60); do
+  if [[ -b "$runtime_disk" ]]; then
+    break
+  fi
+  if [[ "$attempt" -eq 60 ]]; then
+    echo "Runtime disk did not appear; refusing to continue bootstrap." >&2
+    exit 1
+  fi
+  sleep 1
+done
+
+if ! blkid -p "$runtime_disk" >/dev/null 2>&1; then
+  if wipefs --noheadings "$runtime_disk" | grep -q "[^[:space:]]"; then
+    echo "Runtime disk contains an unknown signature; refusing to format it." >&2
+    exit 1
+  fi
+  mkfs.ext4 -F -L coreview-runtime "$runtime_disk"
+fi
+
+runtime_fstype="$(blkid -s TYPE -o value "$runtime_disk")"
+if [[ "$runtime_fstype" != "ext4" ]]; then
+  echo "Runtime disk filesystem is not ext4; refusing to mount it." >&2
+  exit 1
+fi
+
+install -d -m 0711 "$docker_root"
+runtime_uuid="$(blkid -s UUID -o value "$runtime_disk")"
+if [[ -z "$runtime_uuid" ]]; then
+  echo "Runtime disk has no filesystem UUID; refusing to continue." >&2
+  exit 1
+fi
+if ! grep -Fq "UUID=$runtime_uuid " /etc/fstab; then
+  printf 'UUID=%s %s ext4 defaults,nodev,nosuid 0 2\n' "$runtime_uuid" "$docker_root" >> /etc/fstab
+fi
+if ! mountpoint --quiet "$docker_root"; then
+  mount "$docker_root"
+fi
+
+install -d -m 0755 /etc/systemd/system/docker.service.d
+cat > /etc/systemd/system/docker.service.d/coreview-runtime.conf <<'DOCKER_MOUNT_UNIT'
+[Unit]
+RequiresMountsFor=/var/lib/docker
+After=var-lib-docker.mount
+DOCKER_MOUNT_UNIT
+
+install -d -m 0755 "$(dirname "$compose_plugin")" "$install_root/bin"
+curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+  "https://github.com/docker/compose/releases/download/v${docker_compose_version}/docker-compose-linux-x86_64" \
+  --output "$compose_plugin"
+printf '%s  %s\n' '${docker_compose_sha256}' "$compose_plugin" | sha256sum --check --status
+chmod 0755 "$compose_plugin"
+
+printf '%s' '${compose_config_b64}' | base64 --decode > "$install_root/compose.yaml"
+printf '%s' '${servers_config_b64}' | base64 --decode > "$install_root/servers.synthetic.json"
+chown root:root "$install_root/compose.yaml" "$install_root/servers.synthetic.json"
+chmod 0644 "$install_root/compose.yaml" "$install_root/servers.synthetic.json"
+
+cat > "$install_root/bin/pull-and-start" <<'PULL_AND_START'
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly registry_host='${registry_host}'
+readonly env_file="/opt/coreview/.env"
+readonly imds_token_endpoint='http://169.254.169.254/metadata/identity/oauth2/token?api-version=2019-08-01&resource=https%3A%2F%2Fcontainerregistry.azure.net'
+
+# The env file is root-owned and contains only initializer-validated shell-safe values.
+set -a
+# shellcheck disable=SC1090
+source "$env_file"
+set +a
+readonly expected_image_prefix="$registry_host/coreview@sha256:"
+if [[ "$${COREVIEW_IMAGE:-}" != "$expected_image_prefix"* ]]; then
+  echo "COREVIEW_IMAGE must reference the expected ACR repository by digest." >&2
+  exit 1
+fi
+image_digest="$${COREVIEW_IMAGE#"$expected_image_prefix"}"
+if [[ ! "$image_digest" =~ ^[0-9a-f]{64}$ ]]; then
+  echo "COREVIEW_IMAGE contains an invalid sha256 digest." >&2
+  exit 1
+fi
+readonly image_uri="$COREVIEW_IMAGE"
+unset COREVIEW_IMAGE image_digest
+
+docker_config="$(mktemp -d /run/coreview-docker-config.XXXXXX)"
+cleanup() {
+  docker --config "$docker_config" logout "$registry_host" >/dev/null 2>&1 || true
+  rm -rf -- "$docker_config"
+}
+trap cleanup EXIT
+
+aad_json="$(
+  curl --fail --silent --show-error --max-redirs 0 \
+    --header 'Metadata: true' "$imds_token_endpoint"
+)"
+aad_access_token="$(
+  printf '%s' "$aad_json" \
+    | python3 -c 'import json, sys; print(json.load(sys.stdin)["access_token"])'
+)"
+unset aad_json
+
+acr_json="$(
+  curl --fail --silent --show-error --max-redirs 0 \
+    --request POST "https://$registry_host/oauth2/exchange" \
+    --data-urlencode 'grant_type=access_token' \
+    --data-urlencode "service=$registry_host" \
+    --data-urlencode "access_token=$aad_access_token"
+)"
+unset aad_access_token
+acr_refresh_token="$(
+  printf '%s' "$acr_json" \
+    | python3 -c 'import json, sys; print(json.load(sys.stdin)["refresh_token"])'
+)"
+unset acr_json
+
+printf '%s' "$acr_refresh_token" \
+  | docker --config "$docker_config" login \
+      --username 00000000-0000-0000-0000-000000000000 \
+      --password-stdin "$registry_host" >/dev/null
+unset acr_refresh_token
+
+docker --config "$docker_config" pull "$image_uri"
+docker compose --env-file /opt/coreview/.env --file /opt/coreview/compose.yaml \
+  up --detach --wait --wait-timeout 180 --pull never
+PULL_AND_START
+chmod 0755 "$install_root/bin/pull-and-start"
+
+cat > "$install_root/bin/initialize-lab-secrets" <<'INITIALIZE_SECRETS'
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+
+if [[ "$EUID" -ne 0 ]]; then
+  exec sudo -- "$0" "$@"
+fi
+
+if [[ "$#" -ne 1 || ! "$1" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+  echo "Usage: $0 sha256:<approved-64-hex-manifest-digest>" >&2
+  exit 1
+fi
+readonly image_digest="$1"
+readonly registry_host='${registry_host}'
+readonly image_uri="$registry_host/coreview@$image_digest"
+readonly env_file="/opt/coreview/.env"
+if [[ -e "$env_file" ]]; then
+  echo "Refusing to overwrite existing runtime secrets: $env_file" >&2
+  exit 1
+fi
+
+read -r -s -p "Synthetic lab admin password (16+ characters; letters, digits, dot, underscore or hyphen): " admin_password
+printf '\n'
+if (( $${#admin_password} < 16 )); then
+  echo "Password is shorter than 16 characters; no file was written." >&2
+  unset admin_password
+  exit 1
+fi
+if [[ ! "$admin_password" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "Password contains a character unsafe for the Compose JSON environment contract; no file was written." >&2
+  unset admin_password
+  exit 1
+fi
+
+app_secret="$(openssl rand -hex 32)"
+{
+  printf 'COREVIEW_IMAGE=%s\n' "$image_uri"
+  printf 'COREVIEW_LAB_APP_SECRET=%s\n' "$app_secret"
+  printf 'COREVIEW_LAB_ADMIN_PASSWORD=%s\n' "$admin_password"
+} > "$${env_file}.tmp"
+chown root:root "$${env_file}.tmp"
+chmod 0600 "$${env_file}.tmp"
+mv "$${env_file}.tmp" "$env_file"
+unset app_secret admin_password
+
+systemctl start coreview-lab.service
+echo "Runtime secrets created and CoreView startup requested."
+INITIALIZE_SECRETS
+chmod 0755 "$install_root/bin/initialize-lab-secrets"
+
+cat > "$install_root/bin/update-runtime-image" <<'UPDATE_IMAGE'
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+
+if [[ "$EUID" -ne 0 ]]; then
+  exec sudo -- "$0" "$@"
+fi
+if [[ "$#" -ne 1 || ! "$1" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+  echo "Usage: $0 sha256:<approved-64-hex-manifest-digest>" >&2
+  exit 1
+fi
+readonly registry_host='${registry_host}'
+readonly image_uri="$registry_host/coreview@$1"
+readonly env_file="/opt/coreview/.env"
+if [[ ! -f "$env_file" ]]; then
+  echo "Runtime is not initialized; use initialize-lab-secrets first." >&2
+  exit 1
+fi
+backup="$(mktemp /run/coreview-env-backup.XXXXXX)"
+cleanup_update() {
+  rm -f -- "$backup" "$env_file.tmp"
+}
+trap cleanup_update EXIT
+cp --preserve=mode,ownership -- "$env_file" "$backup"
+awk -v replacement="COREVIEW_IMAGE=$image_uri" '
+  BEGIN { updated = 0 }
+  /^COREVIEW_IMAGE=/ { print replacement; updated = 1; next }
+  { print }
+  END { if (!updated) exit 2 }
+' "$env_file" > "$env_file.tmp"
+chown root:root "$env_file.tmp"
+chmod 0600 "$env_file.tmp"
+mv "$env_file.tmp" "$env_file"
+
+if systemctl restart coreview-lab.service; then
+  echo "CoreView now uses the approved digest."
+  exit 0
+fi
+cp --preserve=mode,ownership -- "$backup" "$env_file"
+systemctl start coreview-lab.service || true
+echo "Image update failed; the previous runtime configuration was restored." >&2
+exit 1
+UPDATE_IMAGE
+chmod 0755 "$install_root/bin/update-runtime-image"
+
+cat > /etc/systemd/system/coreview-lab.service <<'SYSTEMD_UNIT'
+[Unit]
+Description=CoreView Cloud Lab synthetic Docker Compose stack
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+ConditionPathExists=/opt/coreview/.env
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/coreview
+ExecStart=/opt/coreview/bin/pull-and-start
+ExecStop=/usr/bin/docker compose --env-file /opt/coreview/.env --file /opt/coreview/compose.yaml down --remove-orphans
+TimeoutStartSec=300
+TimeoutStopSec=90
+
+[Install]
+WantedBy=multi-user.target
+SYSTEMD_UNIT
+
+systemctl unmask docker.service docker.socket
+systemctl daemon-reload
+systemctl enable --now docker.service
+systemctl enable coreview-lab.service
+install -m 0600 /dev/null "$bootstrap_marker"
+
+echo "CoreView host bootstrap complete; publish the reviewed image digest, then initialize runtime secrets through an authorized Bastion tunnel."

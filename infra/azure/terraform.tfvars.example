@@ -1,0 +1,32 @@
+# Copy to ignored terraform.tfvars. Never commit real subscription identifiers,
+# CIDRs, public keys, image versions or digests.
+subscription_id         = "replace-with-authorized-subscription-uuid"
+allowed_subscription_ids = ["replace-with-authorized-subscription-uuid"]
+
+resource_group_name   = "replace-with-approved-resource-group-name"
+create_resource_group = true
+
+# Supply approved, non-overlapping RFC1918 ranges. AzureBastionSubnet must be /26
+# or larger; the workload subnet may be /24 through /28.
+vnet_cidr            = "replace-with-approved-rfc1918-vnet-cidr"
+workload_subnet_cidr = "replace-with-approved-rfc1918-workload-cidr"
+bastion_subnet_cidr  = "replace-with-approved-rfc1918-bastion-cidr"
+
+# Public key only. Never place the private key in Terraform or the repository.
+admin_ssh_public_key = "replace-with-reviewed-ed25519-public-key"
+
+# Resolve an exact Ubuntu Gen2 version during a future authorized preflight.
+source_image = {
+  publisher = "Canonical"
+  offer     = "0001-com-ubuntu-server-jammy"
+  sku       = "22_04-lts-gen2"
+  version   = "replace-with-exact-image-version"
+}
+
+# The registry name must be globally unique. Image tags and digests are handled
+# after provisioning and never enter Terraform custom_data or state.
+acr_name = "replacewithuniqueacrname"
+
+# Resolve the exact docker.io version available in the pinned Ubuntu image.
+docker_package_version = "replace-with-exact-apt-package-version"
+logical_owner          = "coreview-lab"
