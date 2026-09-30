@@ -19,10 +19,10 @@ while IFS= read -r -d '' source_file; do
     -e 's|http://security.debian.org|https://security.debian.org|g' \
     "$source_file"
 done < <(find /etc/apt -type f \( -name '*.list' -o -name '*.sources' \) -print0)
+# Prevent package installation from starting Docker against the boot disk.
+systemctl mask docker.service docker.socket
 apt-get update
 apt-get install --yes --no-install-recommends ca-certificates curl docker.io openssl python3
-
-systemctl stop docker.service docker.socket || true
 
 for attempt in $(seq 1 60); do
   if [[ -b "$runtime_disk" ]]; then
@@ -35,12 +35,26 @@ for attempt in $(seq 1 60); do
   sleep 1
 done
 
-if ! blkid "$runtime_disk" >/dev/null 2>&1; then
+if ! blkid -p "$runtime_disk" >/dev/null 2>&1; then
+  if wipefs --noheadings "$runtime_disk" | grep -q "[^[:space:]]"; then
+    echo "Runtime disk contains an unknown signature; refusing to format it." >&2
+    exit 1
+  fi
   mkfs.ext4 -F -L coreview-runtime "$runtime_disk"
+fi
+
+runtime_fstype="$(blkid -s TYPE -o value "$runtime_disk")"
+if [[ "$runtime_fstype" != "ext4" ]]; then
+  echo "Runtime disk filesystem is not ext4; refusing to mount it." >&2
+  exit 1
 fi
 
 install -d -m 0711 "$docker_root"
 runtime_uuid="$(blkid -s UUID -o value "$runtime_disk")"
+if [[ -z "$runtime_uuid" ]]; then
+  echo "Runtime disk has no filesystem UUID; refusing to continue." >&2
+  exit 1
+fi
 if ! grep -Fq "UUID=$runtime_uuid " /etc/fstab; then
   printf 'UUID=%s %s ext4 defaults,nodev,nosuid 0 2\n' "$runtime_uuid" "$docker_root" >> /etc/fstab
 fi
@@ -161,6 +175,7 @@ WantedBy=multi-user.target
 SYSTEMD_UNIT
 
 systemctl daemon-reload
+systemctl unmask docker.service docker.socket
 systemctl enable --now docker.service
 systemctl enable coreview-lab.service
 install -m 0600 /dev/null "$bootstrap_marker"

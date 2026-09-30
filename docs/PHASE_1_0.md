@@ -22,6 +22,8 @@ image_published_to_ecr: false
 validated_against_real_prtg: false
 ```
 
+> Phase 1.4A later changed Terraform output sensitivity. The 16/0/0 plan above is retained as historical evidence and must be regenerated and fully reviewed before any apply.
+
 Phase 1.0B.0 completed an authorized read-only preflight and plan in
 `us-east-1`; identifiers remain outside version control. Phase 1.0B.1 prepared the separate S3 state backend and Phase 1.0B.2
 produced the reviewed remote-backend plan. Phase 1.0B.3 audits the first
@@ -80,7 +82,7 @@ The root configuration is under `infra/aws/`:
 - `ecr.tf`: encrypted private immutable repository;
 - `compute.tf`: AL2023 x86_64, `t3.small`, IMDSv2, standard CPU credits and
   encrypted gp3;
-- `outputs.tf`: non-sensitive IDs, repository URL and SSM tunnel command;
+- `outputs.tf`: Region as ordinary output; IDs, repository URL and SSM tunnel command are marked sensitive;
 - `templates/`: AWS runtime Compose and secret-free host bootstrap.
 
 This first stack intentionally has no reusable Terraform module layer.

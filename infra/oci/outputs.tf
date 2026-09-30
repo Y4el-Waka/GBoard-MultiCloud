@@ -30,6 +30,7 @@ output "bastion_id" {
 output "container_repository_name" {
   description = "Private immutable OCIR repository name."
   value       = oci_artifacts_container_repository.coreview.display_name
+  sensitive   = true
 }
 
 output "image_repository" {
