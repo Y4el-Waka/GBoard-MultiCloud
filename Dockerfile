@@ -15,12 +15,12 @@ COPY static/src ./static/src
 RUN npm ci --ignore-scripts \
     && npm run build:frontend
 
-FROM python:3.12-slim-bookworm@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e
+FROM python:3.12-slim-bookworm@sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258
 
 LABEL org.opencontainers.image.title="CoreView Cloud Lab" \
       org.opencontainers.image.version="0.5c" \
       org.opencontainers.image.base.name="docker.io/library/python:3.12-slim-bookworm" \
-      org.opencontainers.image.base.digest="sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e"
+      org.opencontainers.image.base.digest="sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

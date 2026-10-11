@@ -9,12 +9,12 @@ hardening, real PRTG validation, or bit-for-bit deterministic OCI manifests.
 The runtime image is based on the official Python image:
 
 - reference: `python:3.12-slim-bookworm`;
-- immutable multi-platform digest:
-  `sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e`;
-- resolved version during validation: Python 3.12.14 on Debian 12.15;
+- immutable Linux/amd64 digest:
+  `sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258`;
+- resolved version during validation: Python 3.12.15 on Debian 12.15;
 - validated target: Linux/amd64;
-- amd64 platform manifest observed:
-  `sha256:1aaa65a85fda306ffb8b910824d4e93bdce61e212c7e87168123ea3073b41a1a`.
+- local image ID observed:
+  `sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258`.
 
 The digest is part of the `FROM` instruction and recorded in OCI labels. The
 human-readable tag remains present so an update reviewer can understand the
@@ -22,11 +22,11 @@ base lineage. A base update is deliberate: resolve a new digest, scan it,
 rebuild without cache, execute all tests/smoke, and update the digest test and
 this document together.
 
-On 2026-09-27 the current `python:3.12-slim-bookworm` and `node:22-alpine`
-tags were pulled/inspected for the validated platform and still resolved to
-the exact digests pinned below and above. No compatible base change was made;
-the complete Trivy findings remain visible rather than being hidden by an
-unrelated stack update.
+On 2026-10-10 the runtime base was deliberately refreshed within the same
+Python 3.12/Bookworm lineage. The new immutable image contains Debian fixes
+for `libpcre2-8-0` (`10.42-1+deb12u2`) and `perl-base`
+(`5.36.0-7+deb12u4`) that were not present in the previous digest. The Node
+build-stage digest did not change.
 
 Phase 0.5C also has a build-only frontend stage:
 
@@ -73,6 +73,21 @@ releases, plus the Flask-required Blinker compatibility change:
 | python-dotenv | 1.0.1 | 1.2.2 | first observed fixed release |
 | idna | 3.14 | 3.15 | first observed fixed release |
 | blinker | 1.8.2 | 1.9.0 | required by Flask 3.1.3 |
+
+### 2026-10-10 security maintenance
+
+The container gate subsequently identified CVE-2026-97687 and
+CVE-2026-97689 in the directly pinned `urllib3==2.7.0`; both have a fixed
+release at 2.8.0. `requests==2.33.0` permits `urllib3>=1.26,<3`, so the direct
+pin and hash lock were updated to `urllib3==2.8.0` without changing the rest
+of the Python resolution.
+
+The same scan found eight fixable HIGH/CRITICAL Debian records in the old
+runtime digest: CVE-2026-103111 in `libpcre2-8-0` and CVE-2026-13221,
+CVE-2026-42496, CVE-2026-8376, CVE-2026-42497, CVE-2026-48962,
+CVE-2026-57432, and CVE-2026-57433 in `perl-base`. The runtime base digest was
+therefore refreshed rather than adding an unpinned package upgrade to the
+Dockerfile. No Trivy severity, fixability, or exit-code policy changed.
 
 The other resolved versions were retained. Pinning and hashing dependencies
 does not prove that they are vulnerability-free.
@@ -140,22 +155,23 @@ current advisory database reports a fixed version:
 There is no `.trivyignore` and no hidden CVE exception list. Adding one requires
 a written owner, scope, reason, expiry, and compensating control.
 
-The Phase 0.5C result is refreshed by the final validation command. The table
-below records the most recent completed scan against
+The security-maintenance result is refreshed by the final validation command.
+The table below records the 2026-10-10 completed scan against
 `coreview-cloud-lab:0.5c`:
 
 | Scope | Critical | High | Medium | Low | Unknown |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Debian 12.15 packages | 5 | 55 | 104 | 102 | 2 |
+| Debian 12.15 packages | 2 | 55 | 117 | 101 | 4 |
 | Python packages | 0 | 0 | 0 | 0 | 0 |
-| Total | 5 | 55 | 104 | 102 | 2 |
+| Total | 2 | 55 | 117 | 101 | 4 |
 
-Of the remaining findings, Trivy reported 4 MEDIUM, 8 LOW, and 1 UNKNOWN with a
-published fix; no remaining HIGH/CRITICAL finding had a published Debian fix
-in the database used by this run. The five CRITICAL records were associated
-with Debian's `libsqlite3-0`, `perl-base`, and `zlib1g` packages. They remain an
-accepted laboratory baseline risk, not a claim of safety. They must be
-re-evaluated whenever the base digest or Trivy database changes.
+Of the remaining findings, Trivy reported one MEDIUM record with a published
+fix; no remaining HIGH/CRITICAL finding had a published Debian fix in the
+database used by this run. The two CRITICAL records were associated with
+Debian's `libsqlite3-0` and `zlib1g` packages. The 55 HIGH records were also
+unfixed according to that database. They remain an accepted laboratory
+baseline risk, not a claim of safety, and must be re-evaluated whenever the
+base digest or Trivy database changes.
 
 The pre-change image reported 5 CRITICAL, 59 HIGH, 117 MEDIUM, 104 LOW, and 2
 UNKNOWN findings. Updating the affected Python packages and removing pip from

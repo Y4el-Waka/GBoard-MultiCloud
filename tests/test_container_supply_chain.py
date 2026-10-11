@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-BASE_DIGEST = "sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e"
+BASE_DIGEST = "sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258"
 NODE_DIGEST = "sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402"
 TRIVY_DIGEST = "sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969"
 
@@ -40,6 +40,7 @@ class ContainerSupplyChainTests(unittest.TestCase):
         self.assertGreaterEqual(len(requirement_lines), 10)
         self.assertGreaterEqual(lock.count("--hash=sha256:"), len(requirement_lines))
         self.assertNotRegex(lock, r"(?m)^[a-zA-Z0-9_.-]+(?<!==)$")
+        self.assertIn("urllib3==2.8.0", lock)
 
     def test_supply_chain_emits_standard_artifacts_and_gates_fixable_risk(self) -> None:
         scanner = (REPO_ROOT / "scripts/container_supply_chain.sh").read_text(
